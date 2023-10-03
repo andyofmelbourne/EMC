@@ -110,6 +110,38 @@ cl_code = cl.Program(context, r"""
     out[n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
     }
 
+    __kernel void calculate_tomogram_batch (
+    image3d_t I, 
+    global float *Cg,  
+    global float *qxg, 
+    global float *qyg,
+    global float *qzg, 
+    global float *Rg, 
+    global float *out, 
+    const float i0, 
+    const float dq, 
+    const int Npix,
+    const int rmin, 
+    const int rmax)
+    {
+    int n = get_global_id(0);
+
+    float C = Cg[n];  
+    float qx = qxg[n];
+    float qy = qyg[n];
+    float qz = qzg[n];
+
+    float R[9];
+    
+    for (int r=rmin; r<rmax; r++){
+        for (int i=0; i<9; i++) {
+            R[i] = Rg[9*r + i];
+        }
+        
+        out[Npix * r + n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+    }
+    }
+
 
     __kernel void calculate_W_to_I_mapping(
     global int *out,
@@ -295,7 +327,7 @@ cl_code = cl.Program(context, r"""
 
     
 
-def calculate_tomogram_sums(I, C, q, qmask, R, dq):
+def calculate_tomogram_sums(I, C, q, qmask, R, dq, rc=256):
     Mrot = R.shape[0]
     
     # number of pixels within qmask
@@ -304,7 +336,7 @@ def calculate_tomogram_sums(I, C, q, qmask, R, dq):
     i0 = np.float32((I.shape[0] - 1)//2)
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
-    W_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
+    W_cl      = cl.array.empty(queue, (rc, Npix,), dtype = np.float32)
     wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
@@ -322,19 +354,18 @@ def calculate_tomogram_sums(I, C, q, qmask, R, dq):
     cl.enqueue_copy(queue, I_cl, I.T.copy().astype(np.float32), is_blocking=True, origin=(0, 0, 0), region=I.shape[::-1])
     
     wsums_out = np.empty((Mrot,))
-    W         = np.empty((Npix,), dtype = np.float32)
+    W         = np.empty((rc, Npix,), dtype = np.float32)
     
     # calculate tomograms then sum then output
-    for r in tqdm.tqdm(range(Mrot), desc='calculating tomogram sums'):
-        cl_code.calculate_tomogram(queue, (Npix,), None,
+    for rmin in tqdm.tqdm(range(0, Mrot, rc), desc='calculating tomogram sums'):
+        rmax = min(rmin + rc, Mrot)
+        cl_code.calculate_tomogram_batch(queue, (Npix,), None,
                 I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
-                R_cl.data, W_cl.data, i0, np.float32(dq), Npix, np.int32(r))
-        
-        queue.finish()
+                R_cl.data, W_cl.data, i0, np.float32(dq), Npix, np.int32(rmin), np.int32(rmax))
         
         cl.enqueue_copy(queue, W, W_cl.data)
         
-        wsums_out[r] = np.sum(W)
+        wsums_out[rmin:rmax] = np.sum(W, axis=1)[:rmax-rmin]
     return wsums_out
 
 
