@@ -34,12 +34,84 @@ import scipy.constants as sc
 import time
 import pickle
 import math
+import os
 
 import logR
 from emc.tomograms import *
 import emc.merge_tomos as merge_tomos
 
 import pyclblast
+
+def write_pixel_chunks(ic, fnam, dataname, qmin, qmax, qmask, Npix, cachedir='cache'):
+    """
+    ic = chunk size (no of det pixels)
+    
+    write pixel chunks to a cache dir for fast retrieval:
+        cache/{i}_{ic}_{qmin}_{qmax}_{dataname}.h5
+    
+    keep chunks in separate files, so that different processes 
+    can read simultaneously (does this make much difference?)
+    """
+    # check if cache exists
+    if not os.path.exists(cachedir) :
+        os.mkdir(cachedir)
+    
+    U = math.ceil(Npix/ic)
+    
+    fnams = [f'{cachedir}/{i}_{ic}_{qmin}_{qmax}_{dataname}.h5' for i in range(U)]
+
+    # if fnams already exists and were completed then exit
+    chunk_exist = np.array([os.path.exists(f) for f in fnams])
+    
+    # check if they finished
+    chunk_done = np.zeros(len(fnams), dtype=bool)
+    for i in range(len(fnams)) :
+        if chunk_exist[i] :
+            with h5py.File(fnams[i]) as f:
+                chunk_done[i] = f['done'][()]
+
+    if np.all(chunk_done) :
+        print(f'found all pixels chunks in {cachedir} for this qmask')
+        return fnams
+    else :
+        print(f'did not found all pixels chunks in {cachedir} for this qmask')
+         
+        # edge case where some of the files exist, due to a previously aborted run
+        for i in np.where(chunk_exist)[0]:
+            os.remove(fnams[i])
+    
+    with h5py.File(fnam) as f:
+        Ndata = f['entry_1/data_1/data'].shape[0]
+    
+    print(f'pixel chunk size {Ndata}x{ic} = {int(Ndata*ic*4/1024**2)} megabytes')
+    
+    # create files and datasets
+    chunk_h5s = [h5py.File(f, 'w-') for f in fnams]
+    for g in chunk_h5s:
+        g.create_dataset('data', shape = (Ndata, ic), dtype=np.float32)
+        g['done'] = False
+            
+    # read data and split pixels 
+    #Ks = np.zeros((U, Ndata, args.ic), dtype=np.float32)
+    with h5py.File(fnam) as f:
+        data = f['entry_1/data_1/data']
+            
+        for d in tqdm.tqdm(range(data.shape[0]), desc='splitting pixels'):
+            K = data[d]
+            
+            for u in range(U):
+                istart = u * ic
+                istop  = min(istart+ic, Npix)
+                chunk_h5s[u]['data'][d, :istop-istart] = K[qmask][istart:istop]
+
+    # close files
+    for g in chunk_h5s:
+        g['done'][...] = True
+        g.close()
+
+    return fnams
+    
+
 
 # GEMMK=0 KREG=1 KWG=32 KWI=2 MDIMA=8 MDIMC=8 MWG=64 NDIMB=8 NDIMC=8 NWG=64 PRECISION=32 SA=1 SB=1 STRM=0 STRN=0 VWM=1 VWN=4
 #params ={"GEMMK": 0,"KREG": 1,"KWG": 32,"KWI": 2,"MDIMA": 8,"MDIMC": 8,"MWG": 64,"NDIMB": 8,"NDIMC": 8,"NWG": 64,"PRECISION": 32,"SA": 1,"SB": 1,"STRM": 0,"STRN": 0,"VWM": 1,"VWN": 4} 
@@ -77,7 +149,6 @@ if __name__ == '__main__':
         P          = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
     
     R, _ = logR.get_rotations(rot_order)
-
     
     ksums  = np.float32(ksums)
     Ndata  = np.int32(Ndata)
@@ -87,20 +158,10 @@ if __name__ == '__main__':
     M      = np.int32(args.mpx)
     dq     = np.float32(qmax / ((args.mpx-1)/2))
 
-
+    # chunk pixels into a cache if not already done 
+    chunk_fnams = write_pixel_chunks(args.ic, args.data, args.dataname, qmin, qmax, qmask, Npix)
+    
     U = math.ceil(Npix/args.ic)
-    Ks = np.zeros((U, Ndata, args.ic), dtype=np.float32)
-    
-    Kt = np.zeros((Npix,), dtype=np.uint16)
-    
-    # could pre-calculate these
-    index = 0
-    for i in tqdm.tqdm(range(U), desc='splitting pixels'):
-        di = min((i+1) * args.ic, Npix) - i*args.ic
-        for d in range(Ndata):
-            Kt.fill(0)
-            Kt[inds[d]] = Knz[d]
-            Ks[i, d][:di] = Kt[i*args.ic: i*args.ic + di]
     
     W    = np.empty((Mrot, args.ic), dtype = np.float32)
     Wd   = np.empty((Mrot, args.ic), dtype = np.float64)
@@ -157,7 +218,8 @@ if __name__ == '__main__':
         
         # copy data-pixels to gpu
         t0 = time.time()
-        cl.enqueue_copy(queue, K_cl.data, Ks[i])
+        with h5py.File(chunk_fnams[i]) as f:
+            cl.enqueue_copy(queue, K_cl.data, f['data'][()])
         load_time += time.time() - t0
         
         # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
