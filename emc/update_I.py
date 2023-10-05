@@ -76,7 +76,8 @@ if __name__ == '__main__':
             rot_order = f['rotation-order'][()]
             wsums      = f['tomogram_sums'][()].astype(np.float32)
             ksums      = f['photon_sums'][()].astype(np.float32)
-            P          = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
+            # 2GB limit for mpi 
+            #P          = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
     
         R, _ = logR.get_rotations(rot_order)
     
@@ -93,9 +94,12 @@ if __name__ == '__main__':
     ksums = comm.bcast(ksums, root=0)
     wsums = comm.bcast(wsums, root=0)
     R     = comm.bcast(R, root=0)
-    P     = comm.bcast(P, root=0)
+    #P     = comm.bcast(P, root=0)
     rot_order = comm.bcast(rot_order, root=0)
     args.mpx = comm.bcast(args.mpx, root=0)
+    
+    with h5py.File(args.P_file) as f :
+        P = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
 
 
 
