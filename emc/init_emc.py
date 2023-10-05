@@ -117,12 +117,21 @@ if __name__ == '__main__':
         fnam_out = f'solid-angle-polarisation-{dataname}.pickle'
         pickle.dump({'mask': mask, 'q': q, 'C': C, 'solid-angles': Omega, 'polarisation': P, 'data-set': fnam, 'q-corner': q_corner, 'q-edge': q_edge}, open(fnam_out, 'wb'))
     
+    # transpose data for faster pixel chunks
+    # --------------------------------------
+    #for fnam in args.data :
+    #    dataname = Path(fnam).stem
+    #    with h5py.File(fnam, 'r') as f:
+            
+
+
+
     dq = qmax_max/((args.mpx-1)/2)
     
     # output initial merged intensities
     # ---------------------------------
     T = len(args.data) * args.sample_states
-
+    
     print("\n")
     print("Merged intensity:")
     print("pixel size    : {:.2e} nm".format(1e9/qmax_max))

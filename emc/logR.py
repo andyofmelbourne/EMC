@@ -147,6 +147,9 @@ def check_output_file(output, Ndata, Mrot):
             f.create_dataset('tomogram_sums', 
                 shape = (Mrot,), 
                 dtype=float)
+            f.create_dataset('photon_sums', 
+                shape = (Ndata,), 
+                dtype=float)
             f['qmin'] = 0.
             f['qmax'] = 0.
             f['rotation-order'] = 1
@@ -202,9 +205,10 @@ if __name__ == '__main__':
     check_output_file(args.output, Ndata, Mrot)
     
     # write tomogram sums to file 
-    print(f'writing tomogram sums to {args.output}')
+    print(f'writing tomogram + photon sums to {args.output}')
     with h5py.File(args.output, 'a') as f:
         f['tomogram_sums'][...] = wsums
+        f['photon_sums'][...] = ksums
         f['qmin'][...] = qmin
         f['qmax'][...] = qmax
         f['rotation-order'][...] = rot_order

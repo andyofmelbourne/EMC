@@ -138,7 +138,7 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        out[Npix * (rmax-rmin) + n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        out[Npix * (r-rmin) + n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
     }
     }
 

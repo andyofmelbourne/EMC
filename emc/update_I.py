@@ -19,6 +19,8 @@ if __name__ == '__main__':
                         help="probability matrix h5 file contaning logR values to normalise. For multiple files use coma separated list (no spaces)")
     parser.add_argument('-d', '--data', type=str, default='data.cxi', \
                         help="cxi file containing data frames, for geometry.")
+    parser.add_argument('-T', '--data_T', type=str, default='data_T.h5', \
+                        help="h5 file containing transposed data frames.")
     parser.add_argument('-o', '--output', type=str, default='merged_intensity.pickle', \
                         help="name of output python pickle file. For multiple files an index will be appended.")
     args = parser.parse_args()
@@ -42,83 +44,6 @@ import emc.merge_tomos as merge_tomos
 
 import pyclblast
 
-def write_pixel_chunks(ic, fnam, dataname, qmin, qmax, qmask, Npix, cachedir='cache'):
-    """
-    ic = chunk size (no of det pixels)
-    
-    write pixel chunks to a cache dir for fast retrieval:
-        cache/{i}_{ic}_{qmin}_{qmax}_{dataname}.h5
-    
-    keep chunks in separate files, so that different processes 
-    can read simultaneously (does this make much difference?)
-    """
-    # check if cache exists
-    if not os.path.exists(cachedir) :
-        os.mkdir(cachedir)
-    
-    U = math.ceil(Npix/ic)
-    
-    fnams = [f'{cachedir}/{i}_{ic}_{qmin}_{qmax}_{dataname}.h5' for i in range(U)]
-
-    # if fnams already exists and were completed then exit
-    chunk_exist = np.array([os.path.exists(f) for f in fnams])
-    
-    # check if they finished
-    chunk_done = np.zeros(len(fnams), dtype=bool)
-    for i in range(len(fnams)) :
-        if chunk_exist[i] :
-            with h5py.File(fnams[i]) as f:
-                chunk_done[i] = f['done'][()]
-
-    if np.all(chunk_done) :
-        print(f'found all pixels chunks in {cachedir} for this qmask')
-        return fnams
-    else :
-        print(f'did not found all pixels chunks in {cachedir} for this qmask')
-         
-        # edge case where some of the files exist, due to a previously aborted run
-        for i in np.where(chunk_exist)[0]:
-            os.remove(fnams[i])
-    
-    with h5py.File(fnam) as f:
-        Ndata = f['entry_1/data_1/data'].shape[0]
-    
-    print(f'pixel chunk size {Ndata}x{ic} = {int(Ndata*ic*4/1024**2)} megabytes')
-    
-    # create files and datasets
-    chunk_h5s = [h5py.File(f, 'w-') for f in fnams]
-    for g in chunk_h5s:
-        g.create_dataset('data', shape = (Ndata, ic), dtype=np.float32)
-        g['done'] = False
-            
-    # read data and split pixels 
-    #Ks = np.zeros((U, Ndata, args.ic), dtype=np.float32)
-    with h5py.File(fnam) as f:
-        data = f['entry_1/data_1/data']
-            
-        for d in tqdm.tqdm(range(data.shape[0]), desc='splitting pixels'):
-            K = data[d]
-            
-            for u in range(U):
-                istart = u * ic
-                istop  = min(istart+ic, Npix)
-                chunk_h5s[u]['data'][d, :istop-istart] = K[qmask][istart:istop]
-
-    # close files
-    for g in chunk_h5s:
-        g['done'][...] = True
-        g.close()
-
-    return fnams
-    
-
-
-# GEMMK=0 KREG=1 KWG=32 KWI=2 MDIMA=8 MDIMC=8 MWG=64 NDIMB=8 NDIMC=8 NWG=64 PRECISION=32 SA=1 SB=1 STRM=0 STRN=0 VWM=1 VWN=4
-#params ={"GEMMK": 0,"KREG": 1,"KWG": 32,"KWI": 2,"MDIMA": 8,"MDIMC": 8,"MWG": 64,"NDIMB": 8,"NDIMC": 8,"NWG": 64,"PRECISION": 32,"SA": 1,"SB": 1,"STRM": 0,"STRN": 0,"VWM": 1,"VWN": 4} 
-
-# causes errors... might have to look into cuda for nvidia stuff
-#params = {"GEMMK": 1,"KREG": 8,"KWG": 1,"KWI": 1,"MDIMA": 8,"MDIMC": 8,"MWG": 32,"NDIMB": 8,"NDIMC": 8,"NWG": 64,"PRECISION": 32,"SA": 0,"SB": 0,"STRM": 0,"STRN": 0,"VWM": 4,"VWN": 2}
-#pyclblast.override_parameters(context.devices[0], 'Xgemm', 32, params)
 
 if __name__ == '__main__':
     if args.qmin == None or args.qmax == None :
@@ -135,10 +60,6 @@ if __name__ == '__main__':
     
     qmask, q, C, qmin, qmax = logR.get_qmask(args.qmin, args.qmax, args.dataname)
 
-    # get non-zero photons within qmask from pickle file
-    # and make one if necessary
-    # --------------------------------------------------
-    Knz, inds, ksums = logR.get_non_zero(args.data, qmin, qmax, qmask)
     
     # get rotations from file or recalculate
     # --------------------------------------
@@ -146,6 +67,7 @@ if __name__ == '__main__':
         Ndata, Mrot = f['probability_matrix'].shape
         rot_order = f['rotation-order'][()]
         wsums      = f['tomogram_sums'][()].astype(np.float32)
+        ksums      = f['photon_sums'][()].astype(np.float32)
         P          = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
     
     R, _ = logR.get_rotations(rot_order)
@@ -158,14 +80,12 @@ if __name__ == '__main__':
     M      = np.int32(args.mpx)
     dq     = np.float32(qmax / ((args.mpx-1)/2))
 
-    # chunk pixels into a cache if not already done 
-    chunk_fnams = write_pixel_chunks(args.ic, args.data, args.dataname, qmin, qmax, qmask, Npix)
-    
     U = math.ceil(Npix/args.ic)
     
     W    = np.empty((Mrot, args.ic), dtype = np.float32)
     Wd   = np.empty((Mrot, args.ic), dtype = np.float64)
     Ipix = np.empty((Mrot, args.ic), dtype = np.int32)
+    K    = np.empty((Ndata, args.ic), dtype=np.float32)
     
     P_cl  = cl.array.empty(queue, (Mrot, Ndata), dtype=np.float32)
     K_cl  = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
@@ -194,13 +114,14 @@ if __name__ == '__main__':
     # calculate denominator PK_r = sum_d P_rd (sum_i K_di)
     for i in tqdm.tqdm(range(1), desc='calculating denominator: P . Ksum'):
         pyclblast.gemv(queue, Mrot, Ndata, P_cl, Ksums_cl, PK_cl, a_ld = Ndata)
-    #assert(np.allclose(PK_cl.get(), P.dot(np.ascontiguousarray(ksums.astype(np.float32)))))
+    
     PK = PK_cl.get()
     
     MT = merge_tomos.Merge_tomos(W.shape, (M, M, M))
     
     load_time = 0
     dot_time = 0
+    scale_time = 0
     merge_time = 0
     
     print('number or rotations        :', Mrot)
@@ -208,9 +129,12 @@ if __name__ == '__main__':
     print('number or pixels in q-mask :', Npix)
     start_time = time.time()
     
-    # test
-    #Wk = np.zeros((100, 4, 512, 512), dtype=np.float32)
-    #t = np.zeros((100, Npix))
+    t = np.where(qmask.ravel())[0]
+    inds_qmask = []
+    for i in range(U):
+        istart = i*args.ic
+        istop  = min(istart + args.ic, Npix)
+        inds_qmask.append(t[istart:istop])
      
     # loop over detector pixels
     for i in tqdm.tqdm(range(U), desc='generating tomograms'):
@@ -218,20 +142,17 @@ if __name__ == '__main__':
         
         # copy data-pixels to gpu
         t0 = time.time()
-        with h5py.File(chunk_fnams[i]) as f:
-            cl.enqueue_copy(queue, K_cl.data, f['data'][()])
+        with h5py.File(args.data_T) as f:
+            K[:, :di] = f['data_id'][inds_qmask[i], :].T
+            cl.enqueue_copy(queue, K_cl.data, K)
         load_time += time.time() - t0
         
         # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
+        t0 = time.time()
         pyclblast.gemm(queue, Mrot, di, Ndata, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic)
+        queue.finish()
+        dot_time += time.time() - t0
         
-        #queue.finish()
-        #assert(np.allclose(W_cl.get()[:, :di], P_cl.get().dot(K_cl.get())[:, :di]))
-        
-        # test
-        #cl.enqueue_copy(queue, W, W_cl.data)
-        #cl.enqueue_copy(queue, W, W_cl.data)
-        #t[:100, i*args.ic: i*args.ic + di] = W[:100, :di]
         
         # scale tomograms W_ri = (sum_i W^old_ri) x w_ri / (sum_d P_dr (sum_i K_di)) / (sold + pol. correction C_i)
         t0 = time.time()
@@ -239,13 +160,7 @@ if __name__ == '__main__':
                                            W_cl.data, wsums_cl.data, PK_cl.data, C_cl.data,
                                            np.int32(args.ic), np.int32(0), np.int32(Mrot), np.int32(i*args.ic))
         queue.finish()
-        dot_time += time.time() - t0
-        
-        #queue.finish()
-        #nmax = Mrot * di
-        #t = W.ravel()[:nmax].reshape(Mrot, di)
-        #t *= wsums[:, None] / PK[:, None] / C[qmask][i*args.ic : i*args.ic + di].astype(np.float32)
-        #assert(np.allclose(W_cl.get().ravel()[:nmax], t.ravel()))
+        scale_time += time.time() - t0
         
         # calculate tomogram to merged intensity pixel mappings
         t0 = time.time()
@@ -264,10 +179,6 @@ if __name__ == '__main__':
         merge_time += time.time() - t0
         
     
-    #import pickle 
-    #for ii in range(Wk.shape[0]):
-    #    Wk[ii][qmask] = t[ii]
-    #pickle.dump(Wk, open('tomograms_split_pix.pickle', 'wb'))
     
     I, O = MT.get_I_O()
     
@@ -283,34 +194,20 @@ if __name__ == '__main__':
     print('\n')
     print('total time: {:.2e}s'.format(total_time))
     print('\n')
+    print('total time seconds')
+    print('load  time: {:.1e}'.format( load_time))
+    print('dot   time: {:.1e}'.format( dot_time))
+    print('scale time: {:.1e}'.format( scale_time))
+    print('merge time: {:.1e}'.format( merge_time))
+    print('\n')
     print('total time %')
     print('load  time: {:5.1%}'.format( load_time / total_time))
     print('dot   time: {:5.1%}'.format( dot_time / total_time))
+    print('scale time: {:5.1%}'.format( scale_time / total_time))
     print('merge time: {:5.1%}'.format( merge_time / total_time))
     print('\n')
     print("These numbers shouldn't change unless things are being done more efficiently:")
-    print('load  time / Ndata / (Mrot/rc) / Npix : {:.2e}'.format( load_time / Ndata / Npix))
-    print('dot   time / Ndata / Mrot / Npix      : {:.2e}'.format( dot_time / Ndata / Mrot / Npix))
-    print('merge time / Mrot / Npix              : {:.2e}'.format( 100 * merge_time / Mrot / Npix))
+    print('load  time / Ndata / Npix        : {:.2e}'.format( load_time / Ndata / Npix))
+    print('dot   time / Ndata / Mrot / Npix : {:.2e}'.format( dot_time / Ndata / Mrot / Npix))
+    print('merge time / Mrot / Npix         : {:.2e}'.format( 100 * merge_time / Mrot / Npix))
 
-
-# test matvec: dodgy
-"""
-# 10080, 9033, 2559
-
-Mrot2, Ndata2, di2 = 10080, 9033, 2559
-P2 = np.random.random((Mrot2, Ndata2)).astype(np.float32)
-K2 = np.random.random((Ndata2, di2)).astype(np.float32)
-w2 = np.empty((Mrot2, di2), dtype=np.float32)
-
-P2_cl = cl.array.to_device(queue, P2)
-K2_cl = cl.array.to_device(queue, K2)
-w2_cl = cl.array.to_device(queue, w2)
-
-queue.finish()
-pyclblast.gemm(queue, Mrot2, di2, Ndata2, P2_cl, K2_cl, w2_cl, a_ld = Ndata2, b_ld = di2, c_ld = di2)
-queue.finish()
-
-w2 = P2.dot(K2)
-assert(np.allclose(w2_cl.get(), w2))
-"""
