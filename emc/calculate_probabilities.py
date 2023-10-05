@@ -56,7 +56,7 @@ if __name__ == '__main__':
         most_likely = np.empty((D,), dtype = int)
         
         # calculate mutual information = < sum_r P_dr log(P_dr) >_d
-        mi = np.empty((D,))
+        #mi = np.empty((D,))
         
         # calculate log likelihood = sum_dr P logR 
         LL = np.empty((D,))
@@ -76,7 +76,7 @@ if __name__ == '__main__':
             
             f['probability_matrix'][d] = P
             most_likely[d] = Lmax_r
-            mi[d]          = np.sum(P * np.log(P))
+            #mi[d]          = np.sum(P * np.log(P))
             LL[d]          = np.sum(P * logR)
     
     # output most likely orientation for analysis
@@ -86,7 +86,7 @@ if __name__ == '__main__':
     print_change_in_most_likely_orientations('most_likely_orientations.pickle')
     
     # print mututal information
-    print('mutual information: {:.2e}'.format(np.mean(mi)))
+    #print('mutual information: {:.2e}'.format(np.mean(mi)))
     
     # print log likelihood 
     print('Log likelihood per pattern per rotation: {:.2e}'.format(np.mean(LL)/Mrot))
