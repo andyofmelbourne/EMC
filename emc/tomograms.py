@@ -288,6 +288,48 @@ cl_code = cl.Program(context, r"""
     }
     }
 
+    // one worker per pixel index
+    __kernel void calculate_tomogram_w_scale_log_batch_pix (
+    image3d_t I, 
+    global float *Cg,  
+    global float *qxg, 
+    global float *qyg,
+    global float *qzg, 
+    global float *Rg, 
+    global float *out, 
+    const float i0, 
+    const float dq, 
+    global float *wscale, 
+    const int Npix,
+    const int rmin,
+    const int rmax,
+    const int ioff)
+    {
+    int n = get_global_id(0);
+    
+    float C  = Cg[ioff + n];  
+    float qx = qxg[ioff + n];
+    float qy = qyg[ioff + n];
+    float qz = qzg[ioff + n];
+    
+    float R[9];
+    
+    float t;
+    
+    for (int r=rmin; r<rmax; r++){
+        for (int i=0; i<9; i++) {
+            R[i] = Rg[9*r + i];
+        }
+        
+        t = wscale[r] * _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        
+        if (t > 0.) 
+            out[r*Npix + n] = log(t);
+        else 
+            out[r*Npix + n] = 0.;
+    }
+    }
+
 
 
     __kernel void scale_tomograms_for_merge (

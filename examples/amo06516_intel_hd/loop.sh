@@ -1,12 +1,13 @@
+#!/bin/bash
 # Launch python code
 start=`date +%s`
-init_emc.py --qmin 20000000 --qmax 43644692 -d ../../data/data.cxi
+#init_emc.py --qmin 20000000 --qmax 43644692 
 
 
-for i in {1..2}; do
-    logR.py --rc 1024 --dc 1024 -M 7 -d ../../data/data.cxi
+for i in {1..4}; do
+    logR.py --ic 1024 -M 7 
     calculate_probabilities.py --beta 0.02
-    update_I.py --ic 1024 -d ../../data/data.cxi
+    update_I.py --ic 1024 
 done
 
 

@@ -143,6 +143,8 @@ if __name__ == '__main__':
         # copy data-pixels to gpu
         t0 = time.time()
         with h5py.File(args.data_T) as f:
+            if di != args.ic :
+                K.fill(0)
             K[:, :di] = f['data_id'][inds_qmask[i], :].T
             cl.enqueue_copy(queue, K_cl.data, K)
         load_time += time.time() - t0

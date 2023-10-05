@@ -15,14 +15,14 @@ if __name__ == '__main__':
                         help="minimum q-value for determining probabilities. Default is to set qmin equal to the merged intensity value.")
     parser.add_argument('-s', '--tomo_scale', type=float,  \
                         help="scale tomograms by tomo_scale before computing log. Default: tomo_scale = number of pixels in q-mask")
-    parser.add_argument('--rc', type=int, default=128, \
+    parser.add_argument('--ic', type=int, default=128, \
                         help="number of rotations to simultaneously hold in memory for inner loop.")
-    parser.add_argument('--dc', type=int, default=128, \
-                        help="number of data frames to simultaneously hold in memory for inner loop.")
     parser.add_argument('-I', '--merged_intensity', type=str, default='merged_intensity.pickle', \
                         help="filename of the python pickle file containing merged intensities.")
     parser.add_argument('-d', '--data', type=str, default='data.cxi', \
                         help="cxi file containing data frames")
+    parser.add_argument('-T', '--data_T', type=str, default='data_T.h5', \
+                        help="h5 file containing transposed data frames.")
     parser.add_argument('-o', '--output', type=str,  \
                         help="h5 file to write probability matrix. By default the output = probability-matrix-{merged_intensity}.h5")
     args = parser.parse_args()
@@ -47,6 +47,7 @@ import h5py
 import tqdm
 import pyclblast
 import time
+import math
 
 def get_rotations(M):
     M_in_plane = int(np.pi * M)+1
@@ -91,36 +92,27 @@ def get_qmask(qmin, qmax, dataname):
     return qmask, q, d['C'].copy(), qmin, qmax
     
 
-def get_non_zero(fnam_cxi, qmin, qmax, qmask):
+def get_photon_sums_in_mask(fnam_cxi, qmin, qmax, qmask):
     dataname = Path(fnam_cxi).stem
     
     qmaxint = int(qmax)
     qminint = int(qmin)
-    fnam = f'non-zero-photons-{dataname}-{qminint}-{qmaxint}.pickle'
+    fnam = f'photons-sums-{dataname}-{qminint}-{qmaxint}.pickle'
     if os.path.exists(fnam) :
-        d = pickle.load(open(fnam, 'rb'))
-        K, locs, ksums = d['K'].copy(), d['inds'].copy(), d['ksums'].copy()
+        ksums = pickle.load(open(fnam, 'rb'))
     else :
         # output unmasked non-zero pixels and indices to pickle file
-        K = {}
-        locs   = {}
         ksums = []
-        inds      = np.arange(np.sum(qmask), dtype=np.uint32)
         with h5py.File(fnam_cxi, 'r') as f:
             data = f['entry_1/data_1/data']
             shape = data.shape
             
-            for d in tqdm.tqdm(range(0, shape[0]), desc='writing non-zero photon counts to pickle file'):
-                Kd = data[d]
-                frame = Kd[qmask]
-                m     = frame > 0 
-                K[d] = frame[m]
-                locs[d] = inds[m.ravel()]
-                
-                ksums.append(np.sum(K[d]))
+            for d in tqdm.tqdm(range(0, shape[0]), desc='calculating photon sums in qmask (writing to pickle file)'):
+                ksums.append(np.sum(data[d][qmask]))
         
-        pickle.dump({'K': K, 'inds': locs, 'ksums': np.array(ksums)}, open(fnam, 'wb'))
-    return K, locs, ksums
+        pickle.dump(np.array(ksums), open(fnam, 'wb'))
+    return ksums
+
 
 def check_output_file(output, Ndata, Mrot):
     # if the number of rotations has changed, then delete 
@@ -193,12 +185,12 @@ if __name__ == '__main__':
     # --------------------------
     wsums = calculate_tomogram_sums(I, C, q, qmask, R, dq)
 
-    # get non-zero photons within qmask from pickle file
+    # get photons sums within qmask from pickle file
     # and make one if necessary
     # --------------------------------------------------
-    Knz, inds, ksums = get_non_zero(args.data, qmin, qmax, qmask)
+    ksums = get_photon_sums_in_mask(args.data, qmin, qmax, qmask)
     
-    Ndata     = len(Knz)
+    Ndata     = len(ksums)
     Mrot      = np.int32(R.shape[0])
     Npix      = np.int32(np.sum(qmask))
     
@@ -223,26 +215,30 @@ if __name__ == '__main__':
         wscale = (Npix / wsums).astype(np.float32)
     else :
         wscale = (args.tomo_scale / wsums).astype(np.float32)
+
     
-    K          = np.empty((args.dc, Npix), dtype=np.float32)
-    logR       = np.empty((args.dc, Mrot))
-    logR_chunk = np.empty((args.dc, args.rc), dtype=np.float32)
+    K          = np.empty((Ndata, args.ic), dtype=np.float32)
+    logR       = np.empty((Ndata, Mrot), dtype=np.float32)
     
-    R_cl      = cl.array.empty(queue, (9*args.rc,), dtype = np.float32)
-    K_cl      = cl.array.empty(queue, (args.dc, Npix), dtype=np.float32)
-    wscale_cl = cl.array.empty(queue, (args.rc,), dtype = np.float32)
+    R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
+    K_cl      = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
+    wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     C_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
-    W_cl      = cl.array.empty(queue, (args.rc, Npix), dtype = np.float32)
-    logR_cl   = cl.array.empty(queue, (args.dc, args.rc), dtype=np.float32)
+    W_cl      = cl.array.empty(queue, (Mrot, args.ic), dtype = np.float32)
+    logR_cl   = cl.array.zeros(queue, (Ndata, Mrot), dtype=np.float32)
     
     cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qz_cl.data, np.ascontiguousarray(q[2][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, C_cl.data,  np.ascontiguousarray(C[qmask].astype(np.float32)))
-
+    cl.enqueue_copy(queue, wscale_cl.data, wscale)
+    cl.enqueue_copy(queue, R_cl.data, np.ascontiguousarray(R.astype(np.float32)))
+    
+    U = math.ceil(Npix/args.ic)
+    
     # copy I as an opencl "image" for trilinear sampling
     I_cl = cl.Image(context, cl.mem_flags.READ_ONLY, cl.ImageFormat(cl.channel_order.R, cl.channel_type.FLOAT), shape=I.shape[::-1])
     cl.enqueue_copy(queue, I_cl, I.T.copy().astype(np.float32), is_blocking=True, origin=(0, 0, 0), region=I.shape[::-1])
@@ -254,54 +250,63 @@ if __name__ == '__main__':
     print('number or rotations        :', Mrot)
     print('number or data frames      :', Ndata)
     print('number or pixels in q-mask :', Npix)
+
+    U = math.ceil(Npix/args.ic)
     
-    for d in tqdm.tqdm(range(0, Ndata, args.dc), desc='calculating probabilities'):
-        dd = min(Ndata, d+args.dc) - d
+    t = np.where(qmask.ravel())[0]
+    inds_qmask = []
+    for i in range(U):
+        istart = i*args.ic
+        istop  = min(istart + args.ic, Npix)
+        inds_qmask.append(t[istart:istop])
+    
+    # loop over detector pixels
+    # I think we can also chunk over rotations at no additional cost 
+    for i in tqdm.tqdm(range(U), desc='calculating log R'):
+        istart = i*args.ic
+        istop  = min(istart + args.ic, Npix)
+        di     = istop - istart
         
-        # load data onto gpu
+        # copy data-pixels to gpu
         t0 = time.time()
-        K.fill(0)
-        for f in range(d, d+dd, 1):
-            K[f-d][inds[f]] = Knz[f]
         
-        cl.enqueue_copy(queue, K_cl.data, K)
+        with h5py.File(args.data_T) as f:
+            if di != args.ic :
+                K.fill(0)
+            K[:, :di] = f['data_id'][inds_qmask[i], :].T
+            cl.enqueue_copy(queue, K_cl.data, K)
+        
         load_time += time.time() - t0
         
-        for r in range(0, Mrot, args.rc):
-            dr = min(Mrot, r+args.rc) - r
-            
-            # load rotation matrices and wscale onto gpu
-            t0 = time.time()
-            cl.enqueue_copy(queue, R_cl.data, R[r:r+dr])
-            cl.enqueue_copy(queue, wscale_cl.data, wscale[r:r+dr])
-            load_time += time.time() - t0
+        # calculate all tomograms: log( (tomoscale / wscale)_r x W_ri )
+        t0 = time.time()
+        
+        cl_code.calculate_tomogram_w_scale_log_batch_pix(queue, (di,), None, 
+            I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
+            R_cl.data, W_cl.data, i0, np.float32(dq), 
+            wscale_cl.data, np.int32(args.ic), np.int32(0), Mrot, np.int32(istart))
+        
+        queue.finish()
+        tomo_time += time.time() - t0
              
-            # calculate all tomograms from r -> r + dr 
-            t0 = time.time()
-            cl_code.calculate_tomogram_w_scale_log_batch(queue, (Npix,), None, 
-                I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
-                R_cl.data, W_cl.data, i0, np.float32(dq), 
-                wscale_cl.data, Npix, np.int32(0), np.int32(dr))
-            tomo_time += time.time() - t0
-             
-            # calculate dot product: logR_dr = sum_i K_di log(w_ri)
-            #                           w_ri = tomo_scale * W_ri / sum_i W_ri 
-            queue.finish()
-            t0 = time.time()
-            pyclblast.gemm(queue, dd, dr, Npix, K_cl, W_cl, logR_cl, a_ld=Npix, b_ld=Npix, c_ld = args.rc, b_transp=True)
-            queue.finish()
-            dot_time += time.time() - t0
+        # calculate dot product: logR_dr += sum_(i in mask) K_di log(w_ri)
+        #                            w_ri = tomo_scale * W_ri / sum_i W_ri 
+        queue.finish()
+        t0 = time.time()
+        pyclblast.gemm(queue, Ndata, Mrot, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = Mrot, b_transp=True, beta=1.)
+        queue.finish()
+        dot_time += time.time() - t0
+
             
-            # copy to cpu
-            cl.enqueue_copy(queue, logR_chunk, logR_cl.data)
-            logR[:dd, r:r+dr] = logR_chunk[:dd, :dr]
-            
-        assert(np.all(np.isfinite(logR)))
-            
-        # write probabilities to file
-        # (not probabilities yet, still need to be normalised)
-        with h5py.File(args.output, 'a') as f:
-            f['logR'][d:d+dd] = logR[:dd]
+    # copy to cpu
+    cl.enqueue_copy(queue, logR, logR_cl.data)
+        
+    assert(np.all(np.isfinite(logR)))
+        
+    # write probabilities to file
+    # (not probabilities yet, still need to be normalised)
+    with h5py.File(args.output, 'a') as f:
+        f['logR'][...] = logR
     
     print('\n')
     print('load  time:', 1e6 * load_time / Mrot / Ndata, 'ms')
