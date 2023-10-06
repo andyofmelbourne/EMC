@@ -291,7 +291,6 @@ if __name__ == '__main__':
              
         # calculate dot product: logR_dr += sum_(i in mask) K_di log(w_ri)
         #                            w_ri = tomo_scale * W_ri / sum_i W_ri 
-        queue.finish()
         t0 = time.time()
         pyclblast.gemm(queue, Ndata, Mrot, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = Mrot, b_transp=True, beta=1.)
         queue.finish()
