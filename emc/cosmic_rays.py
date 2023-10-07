@@ -2,6 +2,7 @@ import h5py
 import numpy as np
 from scipy.ndimage import binary_dilation
 from skimage import measure
+from tqdm import tqdm
 
 
 # look for pixels > 5 counts outside r>128 radius
@@ -47,7 +48,7 @@ with h5py.File(fnam, 'a') as f:
     
     #cs = []
     #fs = []
-    for d in range(data.shape[0]):
+    for d in tqdm(range(data.shape[0])):
         frame = data[d] * data_mask
 
         is_ray = False
@@ -59,7 +60,7 @@ with h5py.File(fnam, 'a') as f:
         if np.any(mask) :
             cosmic_mask = np.zeros(frame.shape, dtype = bool)
 
-            print(f'\nframe {d} has pixels above threshold')
+            #print(f'\nframe {d} has pixels above threshold')
             # loop over 2D panels
             for i in range(mask.shape[0]):
                 if np.any(mask[i]) :
@@ -74,15 +75,17 @@ with h5py.File(fnam, 'a') as f:
                      
                     for prop in props:
                         if prop.area < connected_max and prop.area >= connected_min :
-                            print(f'    connected area is within bounds {connected_min} > {prop.area} > {connected_max}')
+                            #print(f'    connected area is within bounds {connected_min} > {prop.area} > {connected_max}')
                             if prop.mean_intensity > average :
-                                print(f'    connected area has mean intenity greater than threshold {prop.mean_intensity} > {average}')
+                                #print(f'    connected area has mean intenity greater than threshold {prop.mean_intensity} > {average}')
                                 cosmic_mask[i][labeled==prop.label] = True
                                 is_ray = True
     
             if is_ray :
+                print(f'\n\nframe {d} has pixels above threshold')
                 #cs.append(np.concatenate([cosmic_mask[i] for i in range(cosmic_mask.shape[0])], axis=1))
                 #fs.append(np.concatenate([frame[i] for i in range(cosmic_mask.shape[0])], axis=1))
-                print(f'    adding to cosmic ray mask')
-                data[d] *= cosmic_mask
+                print(f'    adding to cosmic ray mask\n')
+                data[d] *= ~cosmic_mask
 
+# should be one at 2516
