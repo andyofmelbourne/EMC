@@ -30,7 +30,7 @@ cl_code = cl.Program(context, r"""
     // used to extract values from I
     
     __kernel void merge_tomos ( 
-        global double *I, global int *O, global double *W,
+        global double *I, global double *O, global double *W, global double *PK_on_W_r,
         global int *Ipix, 
         const int rmin, const int rmax, 
         const int Npix, const int M, const int imax)
@@ -54,15 +54,15 @@ cl_code = cl.Program(context, r"""
             I[offset + i] += W[d + n];
             
             // add counter to O  
-            O[offset + i] += 1;
+            O[offset + i] += PK_on_W_r[r];
         }
     }
     }
 
 
     __kernel void sum_Is ( 
-        global double *Is, global int *Os, 
-        global double *I, global int *O, 
+        global double *Is, global double *Os, 
+        global double *I, global double *O, 
         const int M, const int c )
     {
 
@@ -90,15 +90,15 @@ class Merge_tomos():
         
         # one intensity and overlap for each compute unit
         self.Is_cl = cl.array.zeros(queue, (self.cu,) + Ishape, dtype=np.float64)
-        self.Os_cl = cl.array.zeros(queue, (self.cu,) + Ishape, dtype=np.int32)
+        self.Os_cl = cl.array.zeros(queue, (self.cu,) + Ishape, dtype=np.float64)
         self.I_cl = cl.array.zeros(queue, Ishape, dtype=np.float64)
-        self.O_cl = cl.array.zeros(queue, Ishape, dtype=np.int32)
+        self.O_cl = cl.array.zeros(queue, Ishape, dtype=np.float64)
         
         self.W_cl = cl.array.empty(queue, Wshape, dtype = np.float64)
         
         self.R_cl  = cl.array.empty(queue, (Wshape[0], 3, 3), dtype=np.float64)
     
-    def merge(self, W, Ipix, dr, imax = None, is_blocking=True):
+    def merge(self, W, Ipix, dr, PK_on_W_r, imax = None, is_blocking=True):
         if imax == None :
             imax = np.int32(self.Npix)
         else :
@@ -107,7 +107,7 @@ class Merge_tomos():
         rmin = np.int32(0)
         rmax = np.int32(dr)
         cl_code.merge_tomos(queue, (self.cu,), (1,), 
-            self.Is_cl.data, self.Os_cl.data, cl.SVM(W),
+            self.Is_cl.data, self.Os_cl.data, cl.SVM(W), cl.SVM(PK_on_W_r), 
             cl.SVM(Ipix), rmin, rmax, self.Npix, self.M, imax)
         
         if is_blocking :

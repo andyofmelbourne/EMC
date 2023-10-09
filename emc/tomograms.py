@@ -350,8 +350,6 @@ cl_code = cl.Program(context, r"""
     
     __kernel void scale_tomograms_for_merge_w_coffset (
     global float *W,  
-    global float *wsums,  
-    global float *PK,  
     global float *C, 
     const int Npix, 
     const int rmin, 
@@ -361,7 +359,7 @@ cl_code = cl.Program(context, r"""
     int n = get_global_id(0);
     
     for (int r=rmin; r<rmax; r++)
-        W[r*Npix + n] *= wsums[r] / C[coff + n] / PK[r];
+        W[r*Npix + n] /= C[coff + n];
     
     }
     
