@@ -74,8 +74,8 @@ if __name__ == '__main__':
         with h5py.File(args.P_file) as f :
             Ndata, Mrot = f['probability_matrix'].shape
             rot_order = f['rotation-order'][()]
-            wsums      = f['tomogram_sums'][()].astype(np.float32)
-            ksums      = f['photon_sums'][()].astype(np.float32)
+            wsums      = f['tomogram_sums'][()]
+            ksums      = f['photon_sums'][()]
             # 2GB limit for mpi 
             #P          = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
     
@@ -133,7 +133,7 @@ if __name__ == '__main__':
     
     cl.enqueue_copy(queue, P_cl.data, P)
     cl.enqueue_copy(queue, Ksums_cl.data, np.ascontiguousarray(ksums.astype(np.float32)))
-    cl.enqueue_copy(queue, wsums_cl.data, wsums)
+    cl.enqueue_copy(queue, wsums_cl.data, np.ascontiguousarray(wsums.astype(np.float32)))
     cl.enqueue_copy(queue, C_cl.data, np.ascontiguousarray(C[qmask].astype(np.float32)))
     cl.enqueue_copy(queue, R_cl.data, np.ascontiguousarray(R.astype(np.float32)))
     
@@ -144,6 +144,8 @@ if __name__ == '__main__':
 
     PK = P.dot(ksums).astype(np.float32)
     cl.enqueue_copy(queue, PK_cl.data, PK)
+    
+    PK_on_W_r = PK / wsums
      
     MT = merge_tomos.Merge_tomos(W.shape, (M, M, M))
     
@@ -190,10 +192,10 @@ if __name__ == '__main__':
         queue.finish()
         dot_time += time.time() - t0
         
-        # scale tomograms W_ri = (sum_i W^old_ri) x w_ri / (sum_d P_dr (sum_i K_di)) / (sold + pol. correction C_i)
+        # scale tomograms w_ri <-- w_ri / (sold + pol. correction C_i)
         t0 = time.time()
         cl_code.scale_tomograms_for_merge_w_coffset( queue, (di,), None,
-                                           W_cl.data, wsums_cl.data, PK_cl.data, C_cl.data,
+                                           W_cl.data, C_cl.data,
                                            np.int32(args.ic), np.int32(0), np.int32(Mrot), np.int32(istart))
         queue.finish()
         scale_time += time.time() - t0
@@ -208,12 +210,15 @@ if __name__ == '__main__':
         cl.enqueue_copy(queue, W, W_cl.data)
         cl.enqueue_copy(queue, Ipix, Ipix_cl.data)
         
+        # merge tomograms Isum[n] +=  sum_d P_rd K_di[n] / (sold + pol. correction C_i[n])
+        #                 O[n]    +=  sum_d P_rd sum_i K_di / sum_i Wold_ri
+        #                                      PK_r         /    wsums_r
         
         # merge: can I do this on the gpu?
         merge_tomos.queue.finish()
         Wd[:] = W[:]
          
-        MT.merge(Wd, Ipix, Mrot, di, is_blocking=False)
+        MT.merge(Wd, Ipix, Mrot, PK_on_W_r, di, is_blocking=False)
         merge_time += time.time() - t0
     
     I, O = MT.get_I_O()
