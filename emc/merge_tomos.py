@@ -98,14 +98,14 @@ class Merge_tomos():
         
         self.R_cl  = cl.array.empty(queue, (Wshape[0], 3, 3), dtype=np.float64)
     
-    def merge(self, W, Ipix, dr, PK_on_W_r, imax = None, is_blocking=True):
+    def merge(self, W, Ipix, rmin, rmax, PK_on_W_r, imax = None, is_blocking=True):
         if imax == None :
             imax = np.int32(self.Npix)
         else :
             imax = np.int32(imax)
         
-        rmin = np.int32(0)
-        rmax = np.int32(dr)
+        rmin = np.int32(rmin)
+        rmax = np.int32(rmax)
         cl_code.merge_tomos(queue, (self.cu,), (1,), 
             self.Is_cl.data, self.Os_cl.data, cl.SVM(W), cl.SVM(PK_on_W_r), 
             cl.SVM(Ipix), rmin, rmax, self.Npix, self.M, imax)

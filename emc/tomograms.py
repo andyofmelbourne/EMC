@@ -189,7 +189,8 @@ cl_code = cl.Program(context, r"""
     const float i0, 
     const int Npix,
     const int M,
-    const int dr,
+    const int rstart,
+    const int rstop,
     const int ioff)
     {
 
@@ -201,7 +202,7 @@ cl_code = cl.Program(context, r"""
 
     float4 coord;
 
-    for (int r=0; r<dr; r++){
+    for (int r=rstart; r<rstop; r++){
         float R[9];
 
         for (int i=0; i<9; i++) {

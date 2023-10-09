@@ -13,7 +13,9 @@ if __name__ == '__main__':
                         help="maximum q-value for determining probabilities. Default is to set qmax equal to the merged intensity value. -1 sets qmax to the data limit. -2 sets qmax to the edge limit.")
     parser.add_argument('--qmin', type=int,  \
                         help="minimum q-value for determining probabilities. Default is to set qmin equal to the merged intensity value.")
-    parser.add_argument('--ic', type=int, default=128, \
+    parser.add_argument('--rc', type=int, default=1024, \
+                        help="number of rotations to simultaneously hold in memory for inner loop.")
+    parser.add_argument('--ic', type=int, default=1024, \
                         help="number of rotations to simultaneously hold in memory for inner loop.")
     parser.add_argument('-P', '--P_file', type=str, default='probability-matrix-merged_intensity.h5', \
                         help="probability matrix h5 file contaning logR values to normalise. For multiple files use coma separated list (no spaces)")
@@ -101,6 +103,7 @@ if __name__ == '__main__':
     with h5py.File(args.P_file) as f :
         P = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
 
+    P_buf = np.empty((args.rc, Ndata), dtype=np.float32)
 
 
     
@@ -118,7 +121,7 @@ if __name__ == '__main__':
     Ipix = np.empty((Mrot, args.ic), dtype = np.int32)
     K    = np.empty((Ndata, args.ic), dtype=np.float32)
     
-    P_cl  = cl.array.empty(queue, (Mrot, Ndata), dtype=np.float32)
+    P_cl  = cl.array.empty(queue, (args.rc, Ndata), dtype=np.float32)
     K_cl  = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
     W_cl  = cl.array.empty(queue, (Mrot, args.ic), dtype = np.float32)
     C_cl  = cl.array.empty(queue, (Npix,), dtype = np.float32)
@@ -131,7 +134,6 @@ if __name__ == '__main__':
     Ipix_cl  = cl.array.empty(queue, (Mrot, args.ic), dtype = np.int32)
     R_cl     = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     
-    cl.enqueue_copy(queue, P_cl.data, P)
     cl.enqueue_copy(queue, Ksums_cl.data, np.ascontiguousarray(ksums.astype(np.float32)))
     cl.enqueue_copy(queue, wsums_cl.data, np.ascontiguousarray(wsums.astype(np.float32)))
     cl.enqueue_copy(queue, C_cl.data, np.ascontiguousarray(C[qmask].astype(np.float32)))
@@ -161,73 +163,81 @@ if __name__ == '__main__':
     
     start_time = time.time()
     
-    t = list(range(0, Npix, args.ic))[rank::size]
+    i_iter = list(range(0, Npix, args.ic))[rank::size]
     
+    Rrot = math.ceil(Mrot/args.rc)
     if rank == 0 :
-        i_iter = tqdm.tqdm(t, desc='generating tomograms')
+        r_iter = tqdm.tqdm(range(Rrot), desc='generating tomograms')
     else :
-        i_iter = t
+        r_iter = range(Rrot)
 
     Kinds = np.arange(qmask.size).reshape(qmask.shape)
     qinds = Kinds[qmask]
-     
-    # loop over detector pixels
-    for i in i_iter :
-        istart = i
-        istop  = min(i + args.ic, Npix)
-        di     = istop - istart 
-        
-        # copy data-pixels to gpu
-        t0 = time.time()
-        with h5py.File(args.data_T) as f:
-            if di != args.ic :
-                K.fill(0)
-            K[:, :di] = f['data_id'][qinds[istart:istop], :].T
-            cl.enqueue_copy(queue, K_cl.data, K)
-        load_time += time.time() - t0
 
-        # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
-        t0 = time.time()
-        pyclblast.gemm(queue, Mrot, di, Ndata, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic)
-        queue.finish()
-        dot_time += time.time() - t0
-        
-        # scale tomograms w_ri <-- w_ri / (sold + pol. correction C_i)
-        t0 = time.time()
-        cl_code.scale_tomograms_for_merge_w_coffset( queue, (di,), None,
-                                           W_cl.data, C_cl.data,
-                                           np.int32(args.ic), np.int32(0), np.int32(Mrot), np.int32(istart))
-        queue.finish()
-        scale_time += time.time() - t0
-        
-        
-        # calculate tomogram to merged intensity pixel mappings
-        t0 = time.time()
-        cl_code.calculate_W_to_I_mapping_w_ioffset(queue, (di,), None,
-                                         Ipix_cl.data, R_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, dq, 
-                                         i0, np.int32(args.ic), M, np.int32(Mrot), np.int32(istart))
-        
-        cl.enqueue_copy(queue, W, W_cl.data)
-        cl.enqueue_copy(queue, Ipix, Ipix_cl.data)
-        
-        # merge tomograms Isum[n] +=  sum_d P_rd K_di[n] / (sold + pol. correction C_i[n])
-        #                 O[n]    +=  sum_d P_rd sum_i K_di / sum_i Wold_ri
-        #                                      PK_r         /    wsums_r
-        
-        # merge: can I do this on the gpu?
-        merge_tomos.queue.finish()
-        Wd[:] = W[:]
+    for r in r_iter:
+        rstart = r*args.rc
+        rstop  = min(rstart + args.rc, Mrot)
+        dr     = rstop - rstart
          
-        MT.merge(Wd, Ipix, Mrot, PK_on_W_r, di, is_blocking=False)
-        merge_time += time.time() - t0
+        P_buf[:dr] = P[rstart:rstop, :]
+        cl.enqueue_copy(queue, P_cl.data, P_buf)
+         
+        # loop over detector pixels
+        for i in i_iter :
+            istart = i
+            istop  = min(i + args.ic, Npix)
+            di     = istop - istart 
+            
+            # copy data-pixels to gpu
+            t0 = time.time()
+            with h5py.File(args.data_T) as f:
+                if di != args.ic :
+                    K.fill(0)
+                K[:, :di] = f['data_id'][qinds[istart:istop], :].T
+                cl.enqueue_copy(queue, K_cl.data, K)
+            load_time += time.time() - t0
+
+            # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
+            t0 = time.time()
+            pyclblast.gemm(queue, dr, di, Ndata, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic, c_offset = args.ic * rstart)
+            queue.finish()
+            dot_time += time.time() - t0
+            
+            # scale tomograms w_ri <-- w_ri / (sold + pol. correction C_i)
+            t0 = time.time()
+            cl_code.scale_tomograms_for_merge_w_coffset( queue, (di,), None,
+                                               W_cl.data, C_cl.data,
+                                               np.int32(args.ic), np.int32(rstart), np.int32(rstop), np.int32(istart))
+            queue.finish()
+            scale_time += time.time() - t0
+            
+            
+            # calculate tomogram to merged intensity pixel mappings
+            t0 = time.time()
+            cl_code.calculate_W_to_I_mapping_w_ioffset(queue, (di,), None,
+                                             Ipix_cl.data, R_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, dq, 
+                                             i0, np.int32(args.ic), M, np.int32(rstart), np.int32(rstop), np.int32(istart))
+            
+            # should reduce W and Ipix to rc buffers to cut down on transfer...
+            cl.enqueue_copy(queue, W, W_cl.data)
+            cl.enqueue_copy(queue, Ipix, Ipix_cl.data)
+            
+            # merge tomograms Isum[n] +=  sum_d P_rd K_di[n] / (sold + pol. correction C_i[n])
+            #                 O[n]    +=  sum_d P_rd sum_i K_di / sum_i Wold_ri
+            #                                      PK_r         /    wsums_r
+            
+            # merge: can I do this on the gpu?
+            merge_tomos.queue.finish()
+            Wd[:] = W[:]
+             
+            MT.merge(Wd, Ipix, rstart, rstop, PK_on_W_r, di, is_blocking=False)
+            merge_time += time.time() - t0
     
     I, O = MT.get_I_O()
     
     O = comm.reduce(O, op=MPI.SUM, root=0)
     I = comm.reduce(I, op=MPI.SUM, root=0)
 
-    comm.Barrier()
-    
     if rank == 0 :
         overlap = O.copy()
         Isum = I.copy()

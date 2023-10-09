@@ -15,8 +15,10 @@ if __name__ == '__main__':
                         help="minimum q-value for determining probabilities. Default is to set qmin equal to the merged intensity value.")
     parser.add_argument('-s', '--tomo_scale', type=float,  \
                         help="scale tomograms by tomo_scale before computing log. Default: tomo_scale = number of pixels in q-mask")
-    parser.add_argument('--ic', type=int, default=128, \
+    parser.add_argument('--rc', type=int, default=1024, \
                         help="number of rotations to simultaneously hold in memory for inner loop.")
+    parser.add_argument('--ic', type=int, default=1024, \
+                        help="number of detector pixels to simultaneously hold in memory for inner loop.")
     parser.add_argument('-I', '--merged_intensity', type=str, default='merged_intensity.pickle', \
                         help="filename of the python pickle file containing merged intensities.")
     parser.add_argument('-d', '--data', type=str, default='data.cxi', \
@@ -219,6 +221,7 @@ if __name__ == '__main__':
     
     K          = np.empty((Ndata, args.ic), dtype=np.float32)
     logR       = np.empty((Ndata, Mrot), dtype=np.float32)
+    logR_buf   = np.empty((Ndata, args.rc), dtype=np.float32)
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     K_cl      = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
@@ -228,7 +231,7 @@ if __name__ == '__main__':
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     C_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
     W_cl      = cl.array.empty(queue, (Mrot, args.ic), dtype = np.float32)
-    logR_cl   = cl.array.zeros(queue, (Ndata, Mrot), dtype=np.float32)
+    logR_cl   = cl.array.zeros(queue, (Ndata, args.rc), dtype=np.float32)
     
     cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
@@ -251,7 +254,8 @@ if __name__ == '__main__':
     print('number or data frames      :', Ndata)
     print('number or pixels in q-mask :', Npix)
 
-    U = math.ceil(Npix/args.ic)
+    U    = math.ceil(Npix/args.ic)
+    Rrot = math.ceil(Mrot/args.rc)
     
     t = np.where(qmask.ravel())[0]
     inds_qmask = []
@@ -262,43 +266,49 @@ if __name__ == '__main__':
     
     # loop over detector pixels
     # I think we can also chunk over rotations at no additional cost 
-    for i in tqdm.tqdm(range(U), desc='calculating log R'):
-        istart = i*args.ic
-        istop  = min(istart + args.ic, Npix)
-        di     = istop - istart
-        
-        # copy data-pixels to gpu
-        t0 = time.time()
-        
-        with h5py.File(args.data_T) as f:
-            if di != args.ic :
-                K.fill(0)
-            K[:, :di] = f['data_id'][inds_qmask[i], :].T
-            cl.enqueue_copy(queue, K_cl.data, K)
-        
-        load_time += time.time() - t0
-        
-        # calculate all tomograms: log( (tomoscale / wscale)_r x W_ri )
-        t0 = time.time()
-        
-        cl_code.calculate_tomogram_w_scale_log_batch_pix(queue, (di,), None, 
-            I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
-            R_cl.data, W_cl.data, i0, np.float32(dq), 
-            wscale_cl.data, np.int32(args.ic), np.int32(0), Mrot, np.int32(istart))
-        
-        queue.finish()
-        tomo_time += time.time() - t0
-             
-        # calculate dot product: logR_dr += sum_(i in mask) K_di log(w_ri)
-        #                            w_ri = tomo_scale * W_ri / sum_i W_ri 
-        t0 = time.time()
-        pyclblast.gemm(queue, Ndata, Mrot, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = Mrot, b_transp=True, beta=1.)
-        queue.finish()
-        dot_time += time.time() - t0
+    for r in tqdm.tqdm(range(Rrot), desc='calculating log R'):
+        rstart = r*args.rc
+        rstop  = min(rstart + args.rc, Mrot)
+        dr     = rstop - rstart
 
+        cl.enqueue_fill_buffer(queue, logR_cl.data, np.float32(0), 0, logR_cl.nbytes)
+        for i in range(U):
+            istart = i*args.ic
+            istop  = min(istart + args.ic, Npix)
+            di     = istop - istart
             
-    # copy to cpu
-    cl.enqueue_copy(queue, logR, logR_cl.data)
+            # copy data-pixels to gpu
+            t0 = time.time()
+            
+            with h5py.File(args.data_T) as f:
+                if di != args.ic :
+                    K.fill(0)
+                K[:, :di] = f['data_id'][inds_qmask[i], :].T
+                cl.enqueue_copy(queue, K_cl.data, K)
+            
+            load_time += time.time() - t0
+            
+            # calculate all tomograms: log( (tomoscale / wscale)_r x W_ri )
+            t0 = time.time()
+            
+            cl_code.calculate_tomogram_w_scale_log_batch_pix(queue, (di,), None, 
+                I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
+                R_cl.data, W_cl.data, i0, np.float32(dq), 
+                wscale_cl.data, np.int32(args.ic), np.int32(rstart), np.int32(rstop), np.int32(istart))
+            
+            queue.finish()
+            tomo_time += time.time() - t0
+                 
+            # calculate dot product: logR_dr += sum_(i in mask) K_di log(w_ri)
+            #                            w_ri = tomo_scale * W_ri / sum_i W_ri 
+            t0 = time.time()
+            pyclblast.gemm(queue, Ndata, dr, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = args.rc, b_offset = rstart*args.ic, b_transp=True, beta=1.)
+            queue.finish()
+            dot_time += time.time() - t0
+        
+        # copy to cpu
+        cl.enqueue_copy(queue, logR_buf, logR_cl.data)
+        logR[:, rstart:rstop] = logR_buf[:, :dr]
         
     assert(np.all(np.isfinite(logR)))
         
