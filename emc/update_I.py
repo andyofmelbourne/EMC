@@ -201,7 +201,7 @@ if __name__ == '__main__':
             t0 = time.time()
             cl_code.scale_tomograms_for_merge_w_coffset( queue, (di,), None,
                                                W_cl.data, C_cl.data,
-                                               np.int32(args.ic), np.int32(0), np.int32(di), np.int32(istart))
+                                               np.int32(args.ic), np.int32(0), np.int32(dr), np.int32(istart))
             queue.finish()
             scale_time += time.time() - t0
             
@@ -222,7 +222,7 @@ if __name__ == '__main__':
             
             # merge: can I do this on the gpu?
             merge_tomos.queue.finish()
-            Wd[rstart:rstop] = W[rstart:rstop]
+            Wd[:dr] = W[:dr]
              
             MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, is_blocking=False)
             merge_time += time.time() - t0
