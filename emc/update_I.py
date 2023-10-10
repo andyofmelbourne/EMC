@@ -119,8 +119,8 @@ if __name__ == '__main__':
     Wd   = np.empty((Mrot, args.ic), dtype = np.float64)
     Ipix = np.empty((Mrot, args.ic), dtype = np.int32)
     K    = np.empty((Ndata, args.ic), dtype=np.float32)
-    PK   = np.empty((Mrot,), dtype=np.float32)
-    PK_on_W_r = np.empty((Mrot,), dtype=np.float32)
+    PK   = np.empty((Mrot,), dtype=np.float64)
+    PK_on_W_r = np.empty((Mrot,), dtype=np.float64)
 
     P_cl  = cl.array.empty(queue, (args.rc, Ndata), dtype=np.float32)
     K_cl  = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
@@ -129,13 +129,9 @@ if __name__ == '__main__':
     qx_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
-    Ksums_cl = cl.array.empty(queue, (Ndata,), dtype=np.float32)
-    wsums_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     Ipix_cl  = cl.array.empty(queue, (Mrot, args.ic), dtype = np.int32)
     R_cl     = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     
-    cl.enqueue_copy(queue, Ksums_cl.data, np.ascontiguousarray(ksums.astype(np.float32)))
-    cl.enqueue_copy(queue, wsums_cl.data, np.ascontiguousarray(wsums.astype(np.float32)))
     cl.enqueue_copy(queue, C_cl.data, np.ascontiguousarray(C[qmask].astype(np.float32)))
     cl.enqueue_copy(queue, R_cl.data, np.ascontiguousarray(R.astype(np.float32)))
     
@@ -178,7 +174,7 @@ if __name__ == '__main__':
             f['probability_matrix_rd'].read_direct(P_buf, np.s_[rstart:rstop, :], np.s_[:dr])
             cl.enqueue_copy(queue, P_cl.data, P_buf)
         
-        PK[rstart:rstop] = P_buf[:dr].dot(ksums).astype(np.float32)
+        PK[rstart:rstop]        = P_buf.dot(ksums)[:dr]
         PK_on_W_r[rstart:rstop] = PK[rstart:rstop] / wsums[rstart:rstop]
          
         # loop over detector pixels
@@ -231,7 +227,6 @@ if __name__ == '__main__':
              
             MT.merge(Wd, Ipix, rstart, rstop, PK_on_W_r, di, is_blocking=False)
             merge_time += time.time() - t0
-    
     I, O = MT.get_I_O()
     
     O = comm.reduce(O, op=MPI.SUM, root=0)
