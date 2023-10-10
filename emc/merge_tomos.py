@@ -86,7 +86,7 @@ class Merge_tomos():
         self.M     = np.int32(Ishape[0]);
         self.Npix  = np.int32(np.prod(Wshape[1:]))
         
-        self.cu = np.int32(2)
+        self.cu = np.int32(8)
         
         # one intensity and overlap for each compute unit
         self.Is_cl = cl.array.zeros(queue, (self.cu,) + Ishape, dtype=np.float64)

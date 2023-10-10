@@ -181,6 +181,9 @@ if __name__ == '__main__':
     qmask, q, C, qmin, qmax = get_qmask(qmin, qmax, args.dataname)
 
     # check that we are sampling within the domain of the merged intensities
+    if qmax <= qmin :
+        raise Exception(f'qmax is less than or equal to qmin! {qmax}<={qmin}')
+    
     if qmax > d['qmax'] :
         raise Exception('qmax is greater than merged intensity-boundary')
     

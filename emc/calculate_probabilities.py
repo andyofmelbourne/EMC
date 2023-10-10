@@ -89,7 +89,7 @@ if __name__ == '__main__':
             most_likely[d] = Lmax_r
             
             #mi[d]          = np.sum(P * np.log(P))
-            logR_d += ksums[d] * wscale
+            logR_d -= ksums[d] * wscale
             LL[d]   = np.sum(logR[d] * logR_d)
     
         for i in tqdm(range(1), desc=f'writing probabilities to {args.P_file}'):
@@ -124,6 +124,6 @@ if __name__ == '__main__':
     #print('mutual information: {:.2e}'.format(np.mean(mi)))
     
     # print log likelihood 
-    print('Log likelihood per pattern per rotation: {:.2e}'.format(np.mean(LL)/Mrot))
+    print('Log likelihood per pattern: {:.2e}'.format(np.mean(LL)))
     
     #check_sparsity(args.P_file)
