@@ -141,6 +141,9 @@ def check_output_file(output, Ndata, Mrot):
             f.create_dataset('tomogram_sums', 
                 shape = (Mrot,), 
                 dtype=float)
+            f.create_dataset('tomogram_scales', 
+                shape = (Mrot,), 
+                dtype=float)
             f.create_dataset('photon_sums', 
                 shape = (Ndata,), 
                 dtype=float)
@@ -150,6 +153,7 @@ def check_output_file(output, Ndata, Mrot):
     
 
 if __name__ == '__main__':
+    print('\n\n')
     # get merged intensity
     d  = pickle.load(open(args.merged_intensity, 'rb'))
     I  = d['I'].copy()
@@ -186,7 +190,7 @@ if __name__ == '__main__':
     # precalculate tomogram sums
     # --------------------------
     wsums = calculate_tomogram_sums(I, C, q, qmask, R, dq)
-
+    
     # get photons sums within qmask from pickle file
     # and make one if necessary
     # --------------------------------------------------
@@ -217,7 +221,9 @@ if __name__ == '__main__':
         wscale = (Npix / wsums).astype(np.float32)
     else :
         wscale = (args.tomo_scale / wsums).astype(np.float32)
-
+    
+    with h5py.File(args.output, 'a') as f:
+        f['tomogram_scales'][...] = wscale
     
     K          = np.empty((Ndata, args.ic), dtype=np.float32)
     logR       = np.empty((Ndata, Mrot), dtype=np.float32)
@@ -249,7 +255,7 @@ if __name__ == '__main__':
     load_time = 0
     tomo_time = 0
     dot_time = 0
-
+    
     print('number or rotations        :', Mrot)
     print('number or data frames      :', Ndata)
     print('number or pixels in q-mask :', Npix)

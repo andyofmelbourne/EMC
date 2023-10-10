@@ -17,6 +17,7 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 import pickle
+import math
 
 def print_change_in_most_likely_orientations(fnam):
     Ls = []
@@ -48,9 +49,18 @@ def check_sparsity(fnam):
         print('percentage     of frames with prob. more than 1% of max per orientation : {:.2f}%'.format(100*np.mean(no_per_rot)/P.shape[0]))
 
 
+
+# for now: assume 2xlogR fit's on cpu ram
+
 if __name__ == '__main__':
+    print('\n\n')
     with h5py.File(args.P_file, 'a') as f:
         D, Mrot = f['logR'].shape
+        dtype = f['logR'].dtype
+        
+        logR   = np.empty((D, Mrot), dtype = dtype)
+        logR_d = np.empty((Mrot,), dtype = dtype)
+        #P      = np.empty((D, Mrot), dtype = dtype)
         
         # save most likely orientations
         most_likely = np.empty((D,), dtype = int)
@@ -61,27 +71,52 @@ if __name__ == '__main__':
         # calculate log likelihood = sum_dr P logR 
         LL = np.empty((D,))
          
-        for d in tqdm(range(D)):
-            logR = f['logR'][d]
-            Lmax_r = np.argmax(logR)
-            Lmax   = logR[Lmax_r]
+        # read direct is faster and uses less memory
+        #logR = f['logR'][()]
+        for i in tqdm(range(1), desc=f'reading logR from {args.P_file}'):
+            f['logR'].read_direct(logR, np.s_[:], np.s_[:])
+            wscale = np.log(f['tomogram_scales'][()])
+            ksums  = f['photon_sums'][()] 
+        
+        for d in tqdm(range(D), desc='normalising probabilities: logR -> P'):
+            logR_d[:] = logR[d]
+            Lmax_r = np.argmax(logR_d)
+            Lmax   = logR_d[Lmax_r]
                 
-            P = logR - Lmax
-            P *= args.beta
-            P = np.exp(P)
-            P /= np.sum(P)
+            logR[d]  = np.exp( args.beta * (logR_d - Lmax)) 
+            logR[d]  = logR[d] / np.sum(logR[d])
             
-            if not np.all(np.isfinite(P)):
-                raise Exception
-            
-            f['probability_matrix'][d] = P
             most_likely[d] = Lmax_r
+            
             #mi[d]          = np.sum(P * np.log(P))
-            LL[d]          = np.sum(P * logR)
+            logR_d += ksums[d] * wscale
+            LL[d]   = np.sum(logR[d] * logR_d)
+    
+        for i in tqdm(range(1), desc=f'writing probabilities to {args.P_file}'):
+            #f['probability_matrix'][...] = P
+            f['probability_matrix'].write_direct(logR, np.s_[:], np.s_[:])
+        
+        # now write transpose for faster reading in update_I
+        for i in tqdm(range(1), desc=f'writing transposed probabilities to {args.P_file}'):
+            if 'probability_matrix_rd' not in f :
+                f.create_dataset('probability_matrix_rd', 
+                    shape = (Mrot, D), 
+                    dtype=float)
+            
+            rc = 2**12
+            Rrot = math.ceil(Mrot/rc)
+            PT = np.empty((rc, D), dtype=float)
+            for r in tqdm(range(Rrot), desc='writing'):
+                rstart = r * rc
+                rstop  = min(rstart + rc, Mrot)
+                dr     = rstop - rstart
+                
+                PT[:dr] = logR[:, rstart:rstop].T
+                f['probability_matrix_rd'].write_direct(PT, np.s_[:dr, :], np.s_[rstart:rstop, :])
     
     # output most likely orientation for analysis
     pickle.dump(most_likely, open('most_likely_orientations.pickle', 'ab'))
-
+    
     # print % of patterns that have changed orientation
     print_change_in_most_likely_orientations('most_likely_orientations.pickle')
     
@@ -90,5 +125,5 @@ if __name__ == '__main__':
     
     # print log likelihood 
     print('Log likelihood per pattern per rotation: {:.2e}'.format(np.mean(LL)/Mrot))
-
-    check_sparsity(args.P_file)
+    
+    #check_sparsity(args.P_file)

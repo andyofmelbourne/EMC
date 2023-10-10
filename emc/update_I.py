@@ -53,6 +53,7 @@ import pyclblast
 
 
 if __name__ == '__main__':
+    print('\n\n')
     if rank == 0 :
         if args.qmin == None or args.qmax == None or args.mpx == None:
             # get previous merged intensity
@@ -100,13 +101,11 @@ if __name__ == '__main__':
     rot_order = comm.bcast(rot_order, root=0)
     args.mpx = comm.bcast(args.mpx, root=0)
     
-    with h5py.File(args.P_file) as f :
-        P = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
-
-    P_buf = np.empty((args.rc, Ndata), dtype=np.float32)
-
-
+    #with h5py.File(args.P_file) as f :
+    #    P = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
     
+    P_buf = np.empty((args.rc, Ndata), dtype=np.float32)
+     
     Ndata  = np.int32(Ndata)
     Mrot   = np.int32(Mrot)
     Npix   = np.int32(np.sum(qmask))
@@ -120,12 +119,13 @@ if __name__ == '__main__':
     Wd   = np.empty((Mrot, args.ic), dtype = np.float64)
     Ipix = np.empty((Mrot, args.ic), dtype = np.int32)
     K    = np.empty((Ndata, args.ic), dtype=np.float32)
-    
+    PK   = np.empty((Mrot,), dtype=np.float32)
+    PK_on_W_r = np.empty((Mrot,), dtype=np.float32)
+
     P_cl  = cl.array.empty(queue, (args.rc, Ndata), dtype=np.float32)
     K_cl  = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
     W_cl  = cl.array.empty(queue, (Mrot, args.ic), dtype = np.float32)
     C_cl  = cl.array.empty(queue, (Npix,), dtype = np.float32)
-    PK_cl = cl.array.empty(queue, (Mrot,), dtype=np.float32)
     qx_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
@@ -143,16 +143,11 @@ if __name__ == '__main__':
     cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qz_cl.data, np.ascontiguousarray(q[2][qmask].astype(np.float32)))
     
-
-    PK = P.dot(ksums).astype(np.float32)
-    cl.enqueue_copy(queue, PK_cl.data, PK)
-    
-    PK_on_W_r = PK / wsums
      
     MT = merge_tomos.Merge_tomos(W.shape, (M, M, M))
     
-    load_time = 0
-    dot_time = 0
+    load_time  = 0
+    dot_time   = 0
     scale_time = 0
     merge_time = 0
     
@@ -173,14 +168,18 @@ if __name__ == '__main__':
 
     Kinds = np.arange(qmask.size).reshape(qmask.shape)
     qinds = Kinds[qmask]
-
+    
     for r in r_iter:
         rstart = r*args.rc
         rstop  = min(rstart + args.rc, Mrot)
         dr     = rstop - rstart
          
-        P_buf[:dr] = P[rstart:rstop, :]
-        cl.enqueue_copy(queue, P_cl.data, P_buf)
+        with h5py.File(args.P_file) as f :
+            f['probability_matrix_rd'].read_direct(P_buf, np.s_[rstart:rstop, :], np.s_[:dr])
+            cl.enqueue_copy(queue, P_cl.data, P_buf)
+        
+        PK[rstart:rstop] = P_buf[:dr].dot(ksums).astype(np.float32)
+        PK_on_W_r[rstart:rstop] = PK[rstart:rstop] / wsums[rstart:rstop]
          
         # loop over detector pixels
         for i in i_iter :
@@ -196,7 +195,7 @@ if __name__ == '__main__':
                 K[:, :di] = f['data_id'][qinds[istart:istop], :].T
                 cl.enqueue_copy(queue, K_cl.data, K)
             load_time += time.time() - t0
-
+            
             # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
             t0 = time.time()
             pyclblast.gemm(queue, dr, di, Ndata, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic, c_offset = args.ic * rstart)
