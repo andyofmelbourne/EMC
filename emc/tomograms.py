@@ -212,7 +212,7 @@ cl_code = cl.Program(context, r"""
         float4 coord = _calculate_I_coord(qx,qy,qz,R,i0,dq);
          
         // get flattened I index
-        out[Npix * r + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);
+        out[Npix * (r-rstart) + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);
     }
     }
 

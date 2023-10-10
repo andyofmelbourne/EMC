@@ -93,12 +93,11 @@ class Merge_tomos():
         self.Os_cl = cl.array.zeros(queue, (self.cu,) + Ishape, dtype=np.float64)
         self.I_cl = cl.array.zeros(queue, Ishape, dtype=np.float64)
         self.O_cl = cl.array.zeros(queue, Ishape, dtype=np.float64)
-        
-        self.W_cl = cl.array.empty(queue, Wshape, dtype = np.float64)
-        
-        self.R_cl  = cl.array.empty(queue, (Wshape[0], 3, 3), dtype=np.float64)
     
     def merge(self, W, Ipix, rmin, rmax, PK_on_W_r, imax = None, is_blocking=True):
+        """
+        Ipix and W: (rot chunks, pix chunks)
+        """
         if imax == None :
             imax = np.int32(self.Npix)
         else :

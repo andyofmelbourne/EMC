@@ -115,21 +115,21 @@ if __name__ == '__main__':
 
     U = math.ceil(Npix/args.ic)
     
-    W    = np.empty((Mrot, args.ic), dtype = np.float32)
-    Wd   = np.empty((Mrot, args.ic), dtype = np.float64)
-    Ipix = np.empty((Mrot, args.ic), dtype = np.int32)
+    W    = np.empty((args.rc, args.ic), dtype = np.float32)
+    Wd   = np.empty((args.rc, args.ic), dtype = np.float64)
+    Ipix = np.empty((args.rc, args.ic), dtype = np.int32)
     K    = np.empty((Ndata, args.ic), dtype=np.float32)
-    PK   = np.empty((Mrot,), dtype=np.float64)
-    PK_on_W_r = np.empty((Mrot,), dtype=np.float64)
+    PK   = np.empty((args.rc,), dtype=np.float64)
+    PK_on_W_r = np.empty((args.rc,), dtype=np.float64)
 
     P_cl  = cl.array.empty(queue, (args.rc, Ndata), dtype=np.float32)
     K_cl  = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
-    W_cl  = cl.array.empty(queue, (Mrot, args.ic), dtype = np.float32)
+    W_cl  = cl.array.empty(queue, (args.rc, args.ic), dtype = np.float32)
     C_cl  = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qx_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl = cl.array.empty(queue, (Npix,), dtype = np.float32)
-    Ipix_cl  = cl.array.empty(queue, (Mrot, args.ic), dtype = np.int32)
+    Ipix_cl  = cl.array.empty(queue, (args.rc, args.ic), dtype = np.int32)
     R_cl     = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     
     cl.enqueue_copy(queue, C_cl.data, np.ascontiguousarray(C[qmask].astype(np.float32)))
@@ -138,7 +138,6 @@ if __name__ == '__main__':
     cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qz_cl.data, np.ascontiguousarray(q[2][qmask].astype(np.float32)))
-    
      
     MT = merge_tomos.Merge_tomos(W.shape, (M, M, M))
     
@@ -174,8 +173,8 @@ if __name__ == '__main__':
             f['probability_matrix_rd'].read_direct(P_buf, np.s_[rstart:rstop, :], np.s_[:dr])
             cl.enqueue_copy(queue, P_cl.data, P_buf)
         
-        PK[rstart:rstop]        = P_buf.dot(ksums)[:dr]
-        PK_on_W_r[rstart:rstop] = PK[rstart:rstop] / wsums[rstart:rstop]
+        PK[:dr]        = P_buf.dot(ksums)[:dr]
+        PK_on_W_r[:dr] = PK[:dr] / wsums[rstart:rstop]
          
         # loop over detector pixels
         for i in i_iter :
@@ -194,7 +193,7 @@ if __name__ == '__main__':
             
             # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
             t0 = time.time()
-            pyclblast.gemm(queue, dr, di, Ndata, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic, c_offset = args.ic * rstart)
+            pyclblast.gemm(queue, dr, di, Ndata, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic)
             queue.finish()
             dot_time += time.time() - t0
             
@@ -202,7 +201,7 @@ if __name__ == '__main__':
             t0 = time.time()
             cl_code.scale_tomograms_for_merge_w_coffset( queue, (di,), None,
                                                W_cl.data, C_cl.data,
-                                               np.int32(args.ic), np.int32(rstart), np.int32(rstop), np.int32(istart))
+                                               np.int32(args.ic), np.int32(0), np.int32(di), np.int32(istart))
             queue.finish()
             scale_time += time.time() - t0
             
@@ -223,9 +222,9 @@ if __name__ == '__main__':
             
             # merge: can I do this on the gpu?
             merge_tomos.queue.finish()
-            Wd[:] = W[:]
+            Wd[rstart:rstop] = W[rstart:rstop]
              
-            MT.merge(Wd, Ipix, rstart, rstop, PK_on_W_r, di, is_blocking=False)
+            MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, is_blocking=False)
             merge_time += time.time() - t0
     I, O = MT.get_I_O()
     
