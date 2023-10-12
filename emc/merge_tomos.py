@@ -41,9 +41,12 @@ cl_code = cl.Program(context, r"""
     int i, r, n, d;
     
     int offset = M * M * M * c ;
+
+    double PK;
     
     // loop over tomograms (rotations) and then pixels (data space)
     for (r = rmin + c; r < rmax; r+=C) {
+        PK = PK_on_W_r[r];
         
         // index offset for tomogram r
         d = Npix * r;
@@ -51,10 +54,43 @@ cl_code = cl.Program(context, r"""
             i = Ipix[d + n];
             
             // add photons to I  
-            I[offset + i] += W[d + n];
+            I[offset + i] += W[d + n] / PK;
             
             // add counter to O  
-            O[offset + i] += PK_on_W_r[r];
+            O[offset + i] += 1;
+        }
+    }
+    }
+
+    __kernel void merge_tomos_I ( 
+        global double *I, global double *O, global double *W, global double *PK_on_W_r,
+        global int *Ipix, 
+        const int rmin, const int rmax, 
+        const int Npix, const int M, const int imax)
+    {
+    int c = get_global_id(0);
+    int C = get_global_size(0);
+    
+    int i, r, n, d;
+    
+    int offset = M * M * M * c ;
+
+    double PK ;
+    
+    // loop over tomograms (rotations) and then pixels (data space)
+    for (r = rmin + c; r < rmax; r+=C) {
+        PK = PK_on_W_r[r];
+        
+        // index offset for tomogram r
+        d = Npix * r;
+        for (n = 0; n < imax; n++) {
+            i = Ipix[d + n];
+            
+            // add photons to I  
+            I[offset + i] += W[d + n] ;
+            
+            // add counter to O  
+            O[offset + i] += PK;
         }
     }
     }
@@ -94,7 +130,7 @@ class Merge_tomos():
         self.I_cl = cl.array.zeros(queue, Ishape, dtype=np.float64)
         self.O_cl = cl.array.zeros(queue, Ishape, dtype=np.float64)
     
-    def merge(self, W, Ipix, rmin, rmax, PK_on_W_r, imax = None, is_blocking=True):
+    def merge(self, W, Ipix, rmin, rmax, PK_on_W_r, imax = None, merge_I = False, is_blocking=True):
         """
         Ipix and W: (rot chunks, pix chunks)
         """
@@ -103,9 +139,14 @@ class Merge_tomos():
         else :
             imax = np.int32(imax)
         
+        if merge_I :
+            cl_merge = cl_code.merge_tomos_I
+        else :
+            cl_merge = cl_code.merge_tomos
+        
         rmin = np.int32(rmin)
         rmax = np.int32(rmax)
-        cl_code.merge_tomos(queue, (self.cu,), (1,), 
+        cl_merge(queue, (self.cu,), (1,), 
             self.Is_cl.data, self.Os_cl.data, cl.SVM(W), cl.SVM(PK_on_W_r), 
             cl.SVM(Ipix), rmin, rmax, self.Npix, self.M, imax)
         

@@ -23,6 +23,8 @@ if __name__ == '__main__':
                         help="cxi file containing data frames, for geometry.")
     parser.add_argument('-T', '--data_T', type=str, default='data_T.h5', \
                         help="h5 file containing transposed data frames.")
+    parser.add_argument('--merge_I', action='store_true', \
+                        help="merge tomograms in merged intensity space, this adds P . K in I and P . sum K / sum W in overlap then divides.")
     parser.add_argument('-o', '--output', type=str, default='merged_intensity.pickle', \
                         help="name of output python pickle file. For multiple files an index will be appended.")
     args = parser.parse_args()
@@ -224,7 +226,7 @@ if __name__ == '__main__':
             merge_tomos.queue.finish()
             Wd[:dr] = W[:dr]
              
-            MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, is_blocking=False)
+            MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, merge_I = args.merge_I, is_blocking=False)
             merge_time += time.time() - t0
     I, O = MT.get_I_O()
     
