@@ -10,7 +10,7 @@ from tqdm import tqdm
 # if the number of connected pixels is 4<50 and the counts in these pixels have an average > 5
 #   then cosmic ray
 
-fnam = 'data.cxi'
+fnam = 'data_amo87215.cxi'
 rmin = 128
 threshold = 8
 connected_min = 3

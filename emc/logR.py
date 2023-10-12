@@ -162,7 +162,7 @@ if __name__ == '__main__':
     # get rotations from file or recalculate
     # --------------------------------------
     if args.rotations == None :
-        args.rotations = I.shape[0]
+        args.rotations = I.shape[0]//2
     
     R, rot_order = get_rotations(args.rotations)
     

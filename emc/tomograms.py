@@ -366,6 +366,50 @@ cl_code = cl.Program(context, r"""
     
 """).build()
 
+
+def calculate_tomograms(I, C, q, qmask, R, dq, rs):
+    rc = len(rs)
+    
+    Mrot = R.shape[0]
+    
+    # number of pixels within qmask
+    Npix  = np.int32(np.sum(qmask))
+    # pixel coordinate of q = 0 in I
+    i0 = np.float32((I.shape[0] - 1)//2)
+    
+    R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
+    W_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
+    wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
+    qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
+    qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
+    qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
+    C_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
+    
+    cl.enqueue_copy(queue, R_cl.data, R.astype(np.float32))
+    cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
+    cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
+    cl.enqueue_copy(queue, qz_cl.data, np.ascontiguousarray(q[2][qmask].astype(np.float32)))
+    cl.enqueue_copy(queue, C_cl.data , np.ascontiguousarray(C[qmask].astype(np.float32)))
+    
+    # copy I as an opencl "image" for trilinear sampling
+    I_cl = cl.Image(context, cl.mem_flags.READ_ONLY, cl.ImageFormat(cl.channel_order.R, cl.channel_type.FLOAT), shape=I.shape[::-1])
+    cl.enqueue_copy(queue, I_cl, I.T.copy().astype(np.float32), is_blocking=True, origin=(0, 0, 0), region=I.shape[::-1])
+    
+    Ws = np.empty((rc, Npix,), dtype = np.float32)
+    W  = np.empty((Npix,), dtype = np.float32)
+
+    # calculate tomograms 
+    index = 0
+    for r in tqdm.tqdm(rs, desc='calculating tomogram sums'):
+        cl_code.calculate_tomogram(queue, (Npix,), None,
+                I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
+                R_cl.data, W_cl.data, i0, np.float32(dq), Npix, np.int32(r))
+        
+        cl.enqueue_copy(queue, W, W_cl.data)
+
+        Ws[index] = W
+        index += 1
+    return Ws
     
 
 def calculate_tomogram_sums(I, C, q, qmask, R, dq, rc=256):
