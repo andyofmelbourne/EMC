@@ -134,7 +134,7 @@ if __name__ == '__main__':
     #                       and so d = (n-1) / (2 n qmax)
     # dq = 1 / (d n) = (2 qmax) / (n-1)
     if (args.mpx % 2) == 0 :
-        dq = (args.mpx / 2 - 1) / (qmax n)
+        dq = (args.mpx / 2 - 1) / (qmax * args.mpx)
     else :
         dq = 2 * qmax_max / (args.mpx - 1)
     
