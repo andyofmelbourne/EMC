@@ -123,10 +123,20 @@ if __name__ == '__main__':
     #    dataname = Path(fnam).stem
     #    with h5py.File(fnam, 'r') as f:
             
-
-
-
-    dq = qmax_max/((args.mpx-1)/2)
+    # use np.fft.fftreq style indexing
+    # so for n = mpx even:
+    # |q|max = qmax = n / (2 d n) = 1 / (2 d)
+    #                       and so d = 1 / (2 qmax)
+    # dq = 1 / (d n) = 2 qmax / n 
+    # 
+    # so for n = mpx odd:
+    # |q|max = qmax = (n-1) / (2 d n) 
+    #                       and so d = (n-1) / (2 n qmax)
+    # dq = 1 / (d n) = (2 qmax) / (n-1)
+    if (args.mpx % 2) == 0 :
+        dq = 2 * qmax_max / args.mpx
+    else :
+        dq = 2 * qmax_max / (args.mpx - 1)
     
     # output initial merged intensities
     # ---------------------------------
@@ -138,7 +148,7 @@ if __name__ == '__main__':
     print("field-of-view : {:.2e} nm".format(1e9/dq))
     print("dq            :", int(dq))
     print("(approx.) det. pixels per projected voxel:", (dq / dq_data)**2)
-    
+     
     t = 0
     for s in range(args.sample_states):
         for d in range(len(args.data)):

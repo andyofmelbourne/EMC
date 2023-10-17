@@ -418,7 +418,7 @@ def calculate_tomogram_sums(I, C, q, qmask, R, dq, rc=256):
     # number of pixels within qmask
     Npix  = np.int32(np.sum(qmask))
     # pixel coordinate of q = 0 in I
-    i0 = np.float32((I.shape[0] - 1)//2)
+    i0 = np.float32(I.shape[0]//2)
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     W_cl      = cl.array.empty(queue, (rc, Npix,), dtype = np.float32)

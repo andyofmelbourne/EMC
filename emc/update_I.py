@@ -111,9 +111,14 @@ if __name__ == '__main__':
     Ndata  = np.int32(Ndata)
     Mrot   = np.int32(Mrot)
     Npix   = np.int32(np.sum(qmask))
-    i0     = np.float32((args.mpx - 1)//2)
+    i0     = np.float32(args.mpx//2)
     M      = np.int32(args.mpx)
-    dq     = np.float32(qmax / ((args.mpx-1)/2))
+
+    if (args.mpx % 2) == 0 :
+        dq = 2 * qmax / args.mpx
+    else :
+        dq = 2 * qmax / (args.mpx - 1)
+    dq = np.float32(dq)
 
     U = math.ceil(Npix/args.ic)
     

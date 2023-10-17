@@ -118,7 +118,6 @@ cl_code = cl.Program(context, r"""
 class Merge_tomos():
 
     def __init__(self, Wshape, Ishape):
-        self.i0    = np.float64((Ishape[0] - 1)//2)
         self.M     = np.int32(Ishape[0]);
         self.Npix  = np.int32(np.prod(Wshape[1:]))
         

@@ -73,10 +73,10 @@ def get_rotations(M):
 
 def get_qmask(qmin, qmax, dataname):
     fnam = 'solid-angle-polarisation-'+dataname+'.pickle'
-
+    
     if os.path.exists(fnam) :
         d = pickle.load(open(fnam, 'rb'))
-
+        
         if qmax == -2 :
             qmax = d['q-edge']
         elif qmax == -1 :
@@ -217,7 +217,8 @@ if __name__ == '__main__':
     # caluclate logR_dr = sum_i K_di log( w_ri )
     # ------------------------------------------    
     # pixel coordinate of q = 0 in I
-    i0 = np.float32((I.shape[0] - 1)//2)
+    # np.fft.fftshift np.fft.ffreq style indexing
+    i0 = np.float32(I.shape[0]//2)
 
     # scale tomograms
     if args.tomo_scale == None :
