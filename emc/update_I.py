@@ -115,9 +115,9 @@ if __name__ == '__main__':
     M      = np.int32(args.mpx)
 
     if (args.mpx % 2) == 0 :
-        dq = (args.mpx / 2 - 1) / (qmax * args.mpx)
+        dq = qmax / (args.mpx / 2 - 1)
     else :
-        dq = 2 * qmax_max / (args.mpx - 1)
+        dq = 2 * qmax / (args.mpx - 1)
     dq = np.float32(dq)
     
     U = math.ceil(Npix/args.ic)
