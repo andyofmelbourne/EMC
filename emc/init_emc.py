@@ -125,16 +125,16 @@ if __name__ == '__main__':
             
     # use np.fft.fftreq style indexing
     # so for n = mpx even:
-    # |q|max = qmax = n / (2 d n) = 1 / (2 d)
-    #                       and so d = 1 / (2 qmax)
-    # dq = 1 / (d n) = 2 qmax / n 
+    # |q|max = qmax = (n / 2 - 1) / (d n)
+    #              and so d = (n / 2 - 1) / (qmax n) 
+    # dq = 1 / (d n) = qmax n / (n (n / 2 - 1))
     # 
     # so for n = mpx odd:
     # |q|max = qmax = (n-1) / (2 d n) 
     #                       and so d = (n-1) / (2 n qmax)
     # dq = 1 / (d n) = (2 qmax) / (n-1)
     if (args.mpx % 2) == 0 :
-        dq = 2 * qmax_max / args.mpx
+        dq = (args.mpx / 2 - 1) / (qmax n)
     else :
         dq = 2 * qmax_max / (args.mpx - 1)
     
