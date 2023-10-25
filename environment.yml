@@ -16,5 +16,7 @@ dependencies:
   - prody
   - cython
   - mpi4py
+  - clblast
   - pip
-      - pyclblast
+# has to be done later so that the pip used is the environment one  
+#   - pyclblast
