@@ -61,7 +61,7 @@ if __name__ == '__main__':
         q = xyz.copy() / r
         q[2] -= 1
         q /= wav
-
+        
         r = np.sum(xyz**2, axis=0)**0.5
             
         if args.polarisation == 'x' :

@@ -42,9 +42,9 @@ queue   = cl.CommandQueue(context)
 
 cl_code = cl.Program(context, r"""
     #include <pyopencl-complex.h>
-
+    
     constant sampler_t trilinear = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_LINEAR ;
-
+    
     float4 _calculate_I_coord (
     float qx, 
     float qy,
