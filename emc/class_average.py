@@ -71,10 +71,9 @@ from tqdm import tqdm
 
 gpu_precision = np.float32
 
-# find an opencl device (preferably a GPU) in one of the available platforms
+# find an opencl device (preferably a GPU and preferably NVIDIA) in one of the available platforms
 for p in cl.get_platforms():
-    devices = p.get_devices(cl.device_type.GPU)
-    if len(devices) > 0:
+    if 'NVIDIA' in p.name :
         break
     
 if len(devices) == 0 :
