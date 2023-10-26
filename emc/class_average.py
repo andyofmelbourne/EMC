@@ -15,8 +15,6 @@ import scipy.constants as sc
 import math
 import pickle
 
-import logR
-
 import pyclblast
 
 from mpi4py import MPI
@@ -559,6 +557,26 @@ def calculate_tomogram_sums_MPI(fnam_models, C, r, rmask_prob, R, dr, rc = M_in_
         wsums_all[ns[r]:ns[r+1]] = comm.bcast(wsums, root=r)
     return wsums_all
 
+def get_photon_sums_in_mask(fnam_cxi, qmin, qmax, qmask):
+    dataname = Path(fnam_cxi).stem
+    
+    qmaxint = int(qmax)
+    qminint = int(qmin)
+    fnam = f'photons-sums-{dataname}-{qminint}-{qmaxint}.pickle'
+    if os.path.exists(fnam) :
+        ksums = pickle.load(open(fnam, 'rb'))
+    else :
+        # output unmasked non-zero pixels and indices to pickle file
+        ksums = []
+        with h5py.File(fnam_cxi, 'r') as f:
+            data = f['entry_1/data_1/data']
+            shape = data.shape
+            
+            for d in tqdm.tqdm(range(0, shape[0]), desc='calculating photon sums in qmask (writing to pickle file)'):
+                ksums.append(np.sum(data[d][qmask]))
+        
+        pickle.dump(np.array(ksums), open(fnam, 'wb'))
+    return ksums
 
     
 # initialise 2D models with random numbers
@@ -598,7 +616,7 @@ C = comm.bcast(C, root = 0)
 rankK = min(1, size-1)
 if rank == rankK :
     # Hack: scale r's to pixel units for labeling of pickle files  
-    ksums = logR.get_photon_sums_in_mask(fnam_data, rmin_prob / 75e-6, rmax_prob / 75e-6, rmask_prob)
+    ksums = get_photon_sums_in_mask(fnam_data, rmin_prob / 75e-6, rmax_prob / 75e-6, rmask_prob)
 else :
     ksums = None
     
