@@ -14,6 +14,8 @@ import h5py
 import scipy.constants as sc
 import math
 import pickle
+from pathlib import Path
+import os
 
 import pyclblast
 
@@ -26,7 +28,7 @@ rank = comm.Get_rank()
 
 #fnam_data = "/home/andyofmelbourne/Documents/2023/continuity_constraint/EMC/amo06516.cxi"
 fnam_data_T = "/home/andyofmelbourne/Documents/git_repos/EMC/data/data_T.h5"
-fnam_data   = "/home/andyofmelbourne/Documents/git_repos/EMC/data/data.cxi"
+fnam_data   = "../../data/data.cxi"
 fnam_models = "emc_2d_models.h5"
 
 # merge in tomo or I space
@@ -72,6 +74,7 @@ gpu_precision = np.float32
 # find an opencl device (preferably a GPU and preferably NVIDIA) in one of the available platforms
 for p in cl.get_platforms():
     if 'NVIDIA' in p.name :
+        devices = p.get_devices()
         break
     
 if len(devices) == 0 :
