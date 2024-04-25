@@ -51,6 +51,8 @@ import pyclblast
 import time
 import math
 
+from emc.data_getter import Data_getter
+
 def get_rotations(M):
     M_in_plane = int(np.pi * M)+1
     M_sphere   = int(np.pi * M**2)+1
@@ -269,10 +271,17 @@ if __name__ == '__main__':
     
     t = np.where(qmask.ravel())[0]
     inds_qmask = []
+    inds_qmask2 = []
     for i in range(U):
         istart = i*args.ic
         istop  = min(istart + args.ic, Npix)
-        inds_qmask.append(t[istart:istop])
+        #inds_qmask.append(t[istart:istop])
+        inds_qmask.append(np.s_[istart:istop])
+        
+    data_getter = Data_getter(args.data, 'entry_1/data_1/data', qmask)
+
+    print('K shape:', K.shape)
+    print('qmask :', np.sum(qmask))
     
     # loop over detector pixels
     # I think we can also chunk over rotations at no additional cost 
@@ -290,11 +299,15 @@ if __name__ == '__main__':
             # copy data-pixels to gpu
             t0 = time.time()
             
-            with h5py.File(args.data_T) as f:
-                if di != args.ic :
-                    K.fill(0)
-                K[:, :di] = f['data_id'][inds_qmask[i], :].T
-                cl.enqueue_copy(queue, K_cl.data, K)
+            #with h5py.File(args.data_T) as f:
+            #    if di != args.ic :
+            #        K.fill(0)
+            #    K[:, :di] = f['data_id'][inds_qmask[i], :].T
+            #    cl.enqueue_copy(queue, K_cl.data, K)
+            
+            K[:, :di] = data_getter[:, inds_qmask[i]]
+            K[:, di:] = 0
+            cl.enqueue_copy(queue, K_cl.data, K)
             
             load_time += time.time() - t0
             
@@ -319,6 +332,7 @@ if __name__ == '__main__':
         # copy to cpu
         cl.enqueue_copy(queue, logR_buf, logR_cl.data)
         logR[:, rstart:rstop] = logR_buf[:, :dr]
+    
         
     assert(np.all(np.isfinite(logR)))
         

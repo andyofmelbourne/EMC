@@ -50,6 +50,7 @@ import os
 import logR
 from emc.tomograms import *
 import emc.merge_tomos as merge_tomos
+from emc.data_getter import Data_getter
 
 import pyclblast
 
@@ -171,6 +172,8 @@ if __name__ == '__main__':
     Kinds = np.arange(qmask.size).reshape(qmask.shape)
     qinds = Kinds[qmask]
     
+    data_getter = Data_getter(args.data, 'entry_1/data_1/data', qmask)
+    
     for r in r_iter:
         rstart = r*args.rc
         rstop  = min(rstart + args.rc, Mrot)
@@ -191,11 +194,16 @@ if __name__ == '__main__':
             
             # copy data-pixels to gpu
             t0 = time.time()
-            with h5py.File(args.data_T) as f:
-                if di != args.ic :
-                    K.fill(0)
-                K[:, :di] = f['data_id'][qinds[istart:istop], :].T
-                cl.enqueue_copy(queue, K_cl.data, K)
+            #with h5py.File(args.data_T) as f:
+            #    if di != args.ic :
+            #        K.fill(0)
+            #    K[:, :di] = f['data_id'][qinds[istart:istop], :].T
+            #    cl.enqueue_copy(queue, K_cl.data, K)
+            
+            K[:, :di] = data_getter[:, istart:istop]
+            K[:, di:] = 0
+            cl.enqueue_copy(queue, K_cl.data, K)
+            
             load_time += time.time() - t0
             
             # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
