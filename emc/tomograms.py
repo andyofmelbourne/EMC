@@ -25,16 +25,25 @@ import pyopencl.array
 gpu_precision = np.float32
 
 # find an opencl device (preferably a GPU) in one of the available platforms
+done = False
 for p in cl.get_platforms():
     devices = p.get_devices(cl.device_type.GPU)
-    if len(devices) > 0:
+    if (len(devices) > 0) and ('NVIDIA' in p.name):
+        done = True
         break
-    
+
+if not done :
+    for p in cl.get_platforms():
+        devices = p.get_devices(cl.device_type.GPU)
+        if (len(devices) > 0) :
+            break
+
 if len(devices) == 0 :
     for p in cl.get_platforms():
         devices = p.get_devices()
         if len(devices) > 0:
             break
+
 
 context = cl.Context(devices)
 queue   = cl.CommandQueue(context)
