@@ -160,6 +160,8 @@ if __name__ == '__main__':
     d  = pickle.load(open(args.merged_intensity, 'rb'))
     I  = d['I'].copy()
     dq = d['dq']
+
+    start_time = time.time()
     
     # get rotations from file or recalculate
     # --------------------------------------
@@ -279,7 +281,7 @@ if __name__ == '__main__':
         inds_qmask.append(np.s_[istart:istop])
         
     data_getter = Data_getter(args.data, 'entry_1/data_1/data', qmask)
-
+    
     print('K shape:', K.shape)
     print('qmask :', np.sum(qmask))
     
@@ -289,7 +291,7 @@ if __name__ == '__main__':
         rstart = r*args.rc
         rstop  = min(rstart + args.rc, Mrot)
         dr     = rstop - rstart
-
+        
         cl.enqueue_fill_buffer(queue, logR_cl.data, np.float32(0), 0, logR_cl.nbytes)
         for i in range(U):
             istart = i*args.ic
@@ -298,12 +300,6 @@ if __name__ == '__main__':
             
             # copy data-pixels to gpu
             t0 = time.time()
-            
-            #with h5py.File(args.data_T) as f:
-            #    if di != args.ic :
-            #        K.fill(0)
-            #    K[:, :di] = f['data_id'][inds_qmask[i], :].T
-            #    cl.enqueue_copy(queue, K_cl.data, K)
             
             K[:, :di] = data_getter[:, inds_qmask[i]]
             K[:, di:] = 0
@@ -341,8 +337,21 @@ if __name__ == '__main__':
     with h5py.File(args.output, 'a') as f:
         f['logR'][...] = logR
     
+    total_time = time.time() - start_time 
     print('\n')
-    print('load  time:', 1e6 * load_time / Mrot / Ndata, 'ms')
-    print('dot   time:', 1e6 * dot_time / Mrot / Ndata, 'ms')
-    print('tomo  time:', 1e6 * tomo_time / Mrot / Ndata, 'ms')
+    print('total time: {:.2e}s'.format(total_time))
     print('\n')
+    print('total time seconds')
+    print('load  time: {:.1e}'.format( load_time))
+    print('dot   time: {:.1e}'.format( dot_time))
+    print('tomo  time: {:.1e}'.format( tomo_time))
+    print('\n')
+    print('total time %')
+    print('load  time: {:5.1%}'.format( load_time / total_time))
+    print('dot   time: {:5.1%}'.format( dot_time / total_time))
+    print('tomo  time: {:5.1%}'.format( tomo_time / total_time))
+    print('\n')
+    print("These numbers shouldn't change unless things are being done more efficiently:")
+    print('load  time / Ndata / Npix        : {:.2e}'.format( load_time / Mrot / Ndata))
+    print('dot   time / Ndata / Mrot / Npix : {:.2e}'.format( dot_time / Mrot / Ndata))
+    print('tomo  time / Mrot / Npix         : {:.2e}'.format( tomo_time / Mrot / Ndata))
