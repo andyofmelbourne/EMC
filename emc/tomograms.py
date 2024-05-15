@@ -54,42 +54,8 @@ cl_code = cl.Program(context, r"""
     
     constant sampler_t trilinear = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_LINEAR ;
     
-    float4 _calculate_I_coord (
-    float qx, 
-    float qy,
-    float qz, 
-    float *R, 
-    const float i0, 
-    const float dq)
-    {
-    float4 coord ;
-    
-    coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
-    coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
-    coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
-    
-    return coord;
-    }
-
     
     // one worker per tomogram index
-    float _calculate_tomogram (
-    image3d_t I, 
-    float C,  
-    float qx, 
-    float qy,
-    float qz, 
-    float *R, 
-    const float i0, 
-    const float dq)
-    {
-    float4 coord = _calculate_I_coord(qx,qy,qz,R,i0,dq);
-    
-    float4 v = read_imagef(I, trilinear, coord);
-    
-    return v.x * C;
-    }
-
     __kernel void calculate_tomogram (
     image3d_t I, 
     global float *Cg,  
@@ -116,7 +82,15 @@ cl_code = cl.Program(context, r"""
         R[i] = Rg[9*r + i];
     }
     
-    out[n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+    float4 coord ;
+    
+    coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+    coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+    coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+    
+    float4 v = read_imagef(I, trilinear, coord);
+    
+    out[n] = v.x * C;
     }
 
     __kernel void calculate_tomogram_batch (
@@ -147,7 +121,15 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        out[Npix * (r-rmin) + n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        
+        float4 v = read_imagef(I, trilinear, coord);
+        
+        out[Npix * (r-rmin) + n] = v.x * C;
     }
     }
 
@@ -180,7 +162,11 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        float4 coord = _calculate_I_coord(qx,qy,qz,R,i0,dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
          
         // get flattened I index
         out[Npix * r + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);
@@ -218,7 +204,11 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        float4 coord = _calculate_I_coord(qx,qy,qz,R,i0,dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
          
         // get flattened I index
         out[Npix * (r-rstart) + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);
@@ -254,7 +244,15 @@ cl_code = cl.Program(context, r"""
         R[i] = Rg[9*r + i];
     }
     
-    out[n] = log(wscale[r] * _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq));
+    float4 coord ;
+    
+    coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+    coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+    coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+    
+    float4 v = read_imagef(I, trilinear, coord);
+    
+    out[n] = log(wscale[r] *  v.x * C);
     }
 
     // one worker per index
@@ -289,7 +287,15 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        t = wscale[r] * _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        
+        float4 v = read_imagef(I, trilinear, coord);
+        
+        t = wscale[r] * v.x * C;
 
         if (t > 0.) 
             out[r*Npix + n] = log(t);
@@ -331,7 +337,15 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        t = wscale[r] * _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        
+        float4 v = read_imagef(I, trilinear, coord);
+        
+        t = wscale[r] * v.x * C;
         
         if (t > 0.) 
             out[r*Npix + n] = log(t);
