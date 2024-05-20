@@ -232,7 +232,7 @@ if __name__ == '__main__':
     
     with h5py.File(args.output, 'a') as f:
         f['tomogram_scales'][...] = wscale
-    
+
     K          = np.empty((Ndata, args.ic), dtype=np.float32)
     logR       = np.empty((Ndata, Mrot), dtype=np.float32)
     logR_buf   = np.empty((Ndata, args.rc), dtype=np.float32)
