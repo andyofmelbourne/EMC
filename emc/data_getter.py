@@ -134,7 +134,7 @@ class Data_getter_1():
             out = np.empty((len(frames), len(pixels)), dtype = self.dtype)
         
         with h5py.File(self.fnam) as f:
-            for i, d in tqdm(enumerate(frames), total = len(frames)):
+            for i, d in tqdm(enumerate(frames), total = len(frames), disable = True):
                 out[i, :len(pixels)] = f[self.dataset][d][self.mask][key[1]]
         return out
     
@@ -167,14 +167,14 @@ class Data_getter_1():
             out = self.cache[fnam]
             
         else :
-            print('\nloading from h5 file')
+            #print('\nloading from h5 file')
             out = self.load_h5(key)
             
             # save to RAM
             self.cache[fnam] = out
             
             # save to disk
-            print('caching...\n')
+            #print('caching...\n')
             self.save_sparse(fnam, out)
         
         return out
