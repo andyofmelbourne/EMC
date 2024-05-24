@@ -179,4 +179,91 @@ class Data_getter_1():
         
         return out
 
-Data_getter = Data_getter_1
+
+class Data_getter_2():
+    """Save full dataset in sparse format
+    
+    Load full dataset in memory and keep it there"""
+    def __init__(self, fnam, dataset, cachedir = './cachedir'):
+        self.fnam    = fnam
+        self.dataset = dataset
+        self.cache   = {}
+        self.sparse_fnam = f'cachedir/{fnam}-sparse.h5'
+         
+        with h5py.File(self.fnam) as f:
+            self.dtype = f[dataset].dtype
+            self.shape = f[dataset].shape
+        
+        # store indices
+        self.indices      = np.arange(self.shape[0])
+        
+        # create cachedir if needed
+        if not os.path.exists(cachedir):
+            os.mkdir(cachedir)
+        self.cachedir = cachedir
+        
+        # check if sparse file exists
+        self.sparse_file = os.path.exists(self.sparse_fnam) 
+        self.loaded      = False
+        
+        if not self.sparse_file :   
+            self.save_sparse() 
+        
+        if not self.loaded :
+            self.load_sparse()
+
+        # index frames 
+        self.frame_indices = np.concatenate(([0], np.cumsum(self.litpix)))
+    
+    def save_sparse(self):
+        inds    = []
+        photons = []
+        litpix  = []
+        with h5py.File(self.fnam, 'r') as f:
+            for d in tqdm(range(self.shape[0]), desc = 'extracting data into sparse format'):
+                frame   = f[self.dataset][d].ravel() 
+                inds.append(np.where(frame > 0)[0])
+                photons.append(frame[inds[-1]].copy())
+                litpix.append(len(inds[-1]))
+
+        self.photons = np.concatenate(photons)
+        self.litpix  = np.array(litpix)
+        self.inds    = np.concatenate(inds)
+            
+        for _ in tqdm(range(1), desc = 'saving data in sparse format'):
+            with h5py.File(self.sparse_fnam, 'w') as out:
+                out['photons'] = self.photons
+                out['litpix']  = self.litpix
+                out['inds']    = self.inds
+        
+        self.sparse_file = True
+        self.loaded      = False
+    
+    def load_sparse(self):
+        for _ in tqdm(range(1), desc = 'loading sparse photons from file'):
+            with h5py.File(self.sparse_fnam, 'r') as f:
+                self.photons = f['photons'][()]
+                self.litpix  = f['litpix'][()]
+                self.inds    = f['inds'][()]
+        
+        self.loaded = True
+                
+    def __getitem__(self, key):
+        frames = np.arange(len(self.litpix))[key[0]]
+        pixels = np.arange(np.prod(self.shape[1:]))[key[1]]
+        
+        out   = np.zeros((len(frames), len(pixels)), dtype = self.dtype)
+        frame = np.zeros( (np.prod(self.shape[1:]),), dtype = self.dtype)
+        for i, d in enumerate(frames) :
+            frame.fill(0)
+            j0 = self.frame_indices[d]
+            j1 = self.frame_indices[d + 1]
+            frame[self.inds[j0: j1]] = self.photons[j0: j1]
+            out[i] = frame[pixels]
+            
+        return out
+        
+            
+    
+
+Data_getter = Data_getter_2

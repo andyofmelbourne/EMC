@@ -174,7 +174,7 @@ if __name__ == '__main__':
     Kinds = np.arange(qmask.size).reshape(qmask.shape)
     qinds = Kinds[qmask]
     
-    data_getter = Data_getter(args.data, 'entry_1/data_1/data', qmask)
+    data_getter = Data_getter(args.data, 'entry_1/data_1/data')
     
     for r in r_iter:
         rstart = r*args.rc
@@ -202,7 +202,7 @@ if __name__ == '__main__':
             #    K[:, :di] = f['data_id'][qinds[istart:istop], :].T
             #    cl.enqueue_copy(queue, K_cl.data, K)
             
-            K[:, :di] = data_getter[:, istart:istop]
+            K[:, :di] = data_getter[:, qinds[istart:istop]]
             K[:, di:] = 0
             cl.enqueue_copy(queue, K_cl.data, K)
             
