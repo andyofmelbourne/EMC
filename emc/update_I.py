@@ -25,6 +25,8 @@ if __name__ == '__main__':
                         help="h5 file containing transposed data frames.")
     parser.add_argument('--merge_I', action='store_true', \
                         help="merge tomograms in merged intensity space, this adds P . K in I and P . sum K / sum W in overlap then divides.")
+    parser.add_argument('--inversion_symmetry', action='store_true', \
+                        help="Enforce inversion symmetry on the merged intensities")
     parser.add_argument('-o', '--output', type=str, default='merged_intensity.pickle', \
                         help="name of output python pickle file. For multiple files an index will be appended.")
     args = parser.parse_args()
@@ -50,6 +52,7 @@ import os
 import logR
 from emc.tomograms import *
 import emc.merge_tomos as merge_tomos
+from emc.data_getter import Data_getter
 
 import pyclblast
 
@@ -171,6 +174,8 @@ if __name__ == '__main__':
     Kinds = np.arange(qmask.size).reshape(qmask.shape)
     qinds = Kinds[qmask]
     
+    data_getter = Data_getter(args.data, 'entry_1/data_1/data')
+    
     for r in r_iter:
         rstart = r*args.rc
         rstop  = min(rstart + args.rc, Mrot)
@@ -191,11 +196,16 @@ if __name__ == '__main__':
             
             # copy data-pixels to gpu
             t0 = time.time()
-            with h5py.File(args.data_T) as f:
-                if di != args.ic :
-                    K.fill(0)
-                K[:, :di] = f['data_id'][qinds[istart:istop], :].T
-                cl.enqueue_copy(queue, K_cl.data, K)
+            #with h5py.File(args.data_T) as f:
+            #    if di != args.ic :
+            #        K.fill(0)
+            #    K[:, :di] = f['data_id'][qinds[istart:istop], :].T
+            #    cl.enqueue_copy(queue, K_cl.data, K)
+            
+            K[:, :di] = data_getter[:, qinds[istart:istop]]
+            K[:, di:] = 0
+            cl.enqueue_copy(queue, K_cl.data, K)
+            
             load_time += time.time() - t0
             
             # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
@@ -233,17 +243,28 @@ if __name__ == '__main__':
              
             MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, merge_I = args.merge_I, is_blocking=False)
             merge_time += time.time() - t0
+    
     I, O = MT.get_I_O()
     
     O = comm.reduce(O, op=MPI.SUM, root=0)
     I = comm.reduce(I, op=MPI.SUM, root=0)
 
     if rank == 0 :
+        if args.inversion_symmetry :
+            print('\n')
+            print('enforcing inversion symmetry:')
+            if I.shape[0] % 2 == 0 :
+                shift = 1
+            else :
+                shift = 0
+            I = I + np.roll(I[::-1, ::-1, ::-1], shift, axis = (0,1,2))
+            O = O + np.roll(O[::-1, ::-1, ::-1], shift, axis = (0,1,2))
+        
         overlap = O.copy()
         Isum = I.copy()
         O[O==0] = 1
         I /= O
-
+        
         pickle.dump({'qmax': qmax, 'qmin': qmin, 'dq': dq, 'I': I, 'Isum': Isum, 'overlap': overlap, 't': 0, 'sample-state': 0, 'data-set': args.data}, open(args.output, 'wb'))
          
         # record merged intensity for each iteration

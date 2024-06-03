@@ -31,6 +31,8 @@ import scipy.constants as sc
 import pickle
 import os, sys
 
+np.random.seed(1)
+
 if __name__ == '__main__':
     # remove old files
     for fnam in ['past-merged_intensities.pickle', 'merged_intensities.pickle', 'most_likely_orientations.pickle']:

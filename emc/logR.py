@@ -19,6 +19,8 @@ if __name__ == '__main__':
                         help="number of rotations to simultaneously hold in memory for inner loop.")
     parser.add_argument('--ic', type=int, default=1024, \
                         help="number of detector pixels to simultaneously hold in memory for inner loop.")
+    parser.add_argument('--dc', type=int, default=1024, \
+                        help="number of detector frames to simultaneously hold in memory for inner loop.")
     parser.add_argument('-I', '--merged_intensity', type=str, default='merged_intensity.pickle', \
                         help="filename of the python pickle file containing merged intensities.")
     parser.add_argument('-d', '--data', type=str, default='data.cxi', \
@@ -50,6 +52,8 @@ import tqdm
 import pyclblast
 import time
 import math
+
+from emc.data_getter import Data_getter
 
 def get_rotations(M):
     M_in_plane = int(np.pi * M)+1
@@ -158,6 +162,8 @@ if __name__ == '__main__':
     d  = pickle.load(open(args.merged_intensity, 'rb'))
     I  = d['I'].copy()
     dq = d['dq']
+
+    start_time = time.time()
     
     # get rotations from file or recalculate
     # --------------------------------------
@@ -208,10 +214,10 @@ if __name__ == '__main__':
     # write tomogram sums to file 
     print(f'writing tomogram + photon sums to {args.output}')
     with h5py.File(args.output, 'a') as f:
-        f['tomogram_sums'][...] = wsums
-        f['photon_sums'][...] = ksums
-        f['qmin'][...] = qmin
-        f['qmax'][...] = qmax
+        f['tomogram_sums'][...]  = wsums
+        f['photon_sums'][...]    = ksums
+        f['qmin'][...]           = qmin
+        f['qmax'][...]           = qmax
         f['rotation-order'][...] = rot_order
     
     # caluclate logR_dr = sum_i K_di log( w_ri )
@@ -222,26 +228,28 @@ if __name__ == '__main__':
 
     # scale tomograms
     if args.tomo_scale == None :
-        wscale = (Npix / wsums).astype(np.float32)
+        tomo_scale = Npix 
     else :
-        wscale = (args.tomo_scale / wsums).astype(np.float32)
+        tomo_scale = args.tomo_scale 
+    
+    wscale = (tomo_scale / wsums).astype(np.float32)
     
     with h5py.File(args.output, 'a') as f:
-        f['tomogram_scales'][...] = wscale
+        f['tomogram_scales'][...] = tomo_scale
     
-    K          = np.empty((Ndata, args.ic), dtype=np.float32)
-    logR       = np.empty((Ndata, Mrot), dtype=np.float32)
-    logR_buf   = np.empty((Ndata, args.rc), dtype=np.float32)
+    K          = np.empty((args.dc, args.ic), dtype=np.float32)
+    logR       = np.empty((Ndata, Mrot),    dtype=np.float32)
+    logR_buf   = np.empty((args.dc, args.rc), dtype=np.float32)
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
-    K_cl      = cl.array.empty(queue, (Ndata, args.ic), dtype=np.float32)
+    K_cl      = cl.array.empty(queue, (args.dc, args.ic), dtype=np.float32)
     wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     C_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
     W_cl      = cl.array.empty(queue, (Mrot, args.ic), dtype = np.float32)
-    logR_cl   = cl.array.zeros(queue, (Ndata, args.rc), dtype=np.float32)
+    logR_cl   = cl.array.zeros(queue, (args.dc, args.rc), dtype=np.float32)
     
     cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
@@ -249,8 +257,6 @@ if __name__ == '__main__':
     cl.enqueue_copy(queue, C_cl.data,  np.ascontiguousarray(C[qmask].astype(np.float32)))
     cl.enqueue_copy(queue, wscale_cl.data, wscale)
     cl.enqueue_copy(queue, R_cl.data, np.ascontiguousarray(R.astype(np.float32)))
-    
-    U = math.ceil(Npix/args.ic)
     
     # copy I as an opencl "image" for trilinear sampling
     I_cl = cl.Image(context, cl.mem_flags.READ_ONLY, cl.ImageFormat(cl.channel_order.R, cl.channel_type.FLOAT), shape=I.shape[::-1])
@@ -264,61 +270,75 @@ if __name__ == '__main__':
     print('number or data frames      :', Ndata)
     print('number or pixels in q-mask :', Npix)
 
+    D    = math.ceil(Ndata/args.dc)
     U    = math.ceil(Npix/args.ic)
     Rrot = math.ceil(Mrot/args.rc)
     
     t = np.where(qmask.ravel())[0]
     inds_qmask = []
+    inds_qmask2 = []
     for i in range(U):
         istart = i*args.ic
         istop  = min(istart + args.ic, Npix)
         inds_qmask.append(t[istart:istop])
-    
-    # loop over detector pixels
-    # I think we can also chunk over rotations at no additional cost 
-    for r in tqdm.tqdm(range(Rrot), desc='calculating log R'):
-        rstart = r*args.rc
-        rstop  = min(rstart + args.rc, Mrot)
-        dr     = rstop - rstart
-
-        cl.enqueue_fill_buffer(queue, logR_cl.data, np.float32(0), 0, logR_cl.nbytes)
-        for i in range(U):
-            istart = i*args.ic
-            istop  = min(istart + args.ic, Npix)
-            di     = istop - istart
-            
-            # copy data-pixels to gpu
-            t0 = time.time()
-            
-            with h5py.File(args.data_T) as f:
-                if di != args.ic :
-                    K.fill(0)
-                K[:, :di] = f['data_id'][inds_qmask[i], :].T
-                cl.enqueue_copy(queue, K_cl.data, K)
-            
-            load_time += time.time() - t0
-            
-            # calculate all tomograms: log( (tomoscale / wscale)_r x W_ri )
-            t0 = time.time()
-            
-            cl_code.calculate_tomogram_w_scale_log_batch_pix(queue, (di,), None, 
-                I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
-                R_cl.data, W_cl.data, i0, np.float32(dq), 
-                wscale_cl.data, np.int32(args.ic), np.int32(rstart), np.int32(rstop), np.int32(istart))
-            
-            queue.finish()
-            tomo_time += time.time() - t0
-                 
-            # calculate dot product: logR_dr += sum_(i in mask) K_di log(w_ri)
-            #                            w_ri = tomo_scale * W_ri / sum_i W_ri 
-            t0 = time.time()
-            pyclblast.gemm(queue, Ndata, dr, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = args.rc, b_offset = rstart*args.ic, b_transp=True, beta=1.)
-            queue.finish()
-            dot_time += time.time() - t0
+        #inds_qmask.append(np.s_[istart:istop])
         
-        # copy to cpu
-        cl.enqueue_copy(queue, logR_buf, logR_cl.data)
-        logR[:, rstart:rstop] = logR_buf[:, :dr]
+    data_getter = Data_getter(args.data, 'entry_1/data_1/data')
+    
+    print('K shape:', K.shape)
+    print('qmask :', np.sum(qmask))
+
+    # loop over detector frames
+    for d in tqdm.tqdm(range(D), desc='calculating log R'):
+        dstart = d*args.dc
+        dstop  = min(dstart + args.dc, Ndata)
+        dd     = dstop - dstart
+    
+        # loop over detector pixels
+        # I think we can also chunk over rotations at no additional cost 
+        for r in tqdm.tqdm(range(Rrot), desc='looping over rotation chunks', leave = False):
+            rstart = r*args.rc
+            rstop  = min(rstart + args.rc, Mrot)
+            dr     = rstop - rstart
+            
+            cl.enqueue_fill_buffer(queue, logR_cl.data, np.float32(0), 0, logR_cl.nbytes)
+            for i in tqdm.tqdm(range(U), desc = 'looping over pixel chunks', leave = False):
+                istart = i*args.ic
+                istop  = min(istart + args.ic, Npix)
+                di     = istop - istart
+                
+                # calculate all tomograms within rotation chunk: log( (tomoscale / wscale)_r x W_ri )
+                t0 = time.time()
+                
+                cl_code.calculate_tomogram_w_scale_log_batch_pix(queue, (di,), None, 
+                    I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
+                    R_cl.data, W_cl.data, i0, np.float32(dq), 
+                    wscale_cl.data, np.int32(args.ic), np.int32(rstart), np.int32(rstop), np.int32(istart))
+                
+                queue.finish()
+                tomo_time += time.time() - t0
+
+                # copy data-pixels to gpu
+                t0 = time.time()
+                
+                K[:dd, :di] = data_getter[dstart: dstop, inds_qmask[i]]
+                K[:, di:] = 0
+                K[dd:]    = 0
+                load_time += time.time() - t0
+                
+                cl.enqueue_copy(queue, K_cl.data, K)
+                
+                # calculate dot product: logR_dr += sum_(i in mask) K_di log(w_ri)
+                #                            w_ri = tomo_scale * W_ri / sum_i W_ri 
+                t0 = time.time()
+                pyclblast.gemm(queue, dd, dr, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = args.rc, b_offset = rstart*args.ic, b_transp=True, beta=1.)
+                queue.finish()
+                dot_time += time.time() - t0
+            
+            # copy to cpu
+            cl.enqueue_copy(queue, logR_buf, logR_cl.data)
+            logR[dstart: dstop, rstart:rstop] = logR_buf[:dd, :dr]
+    
         
     assert(np.all(np.isfinite(logR)))
         
@@ -327,8 +347,21 @@ if __name__ == '__main__':
     with h5py.File(args.output, 'a') as f:
         f['logR'][...] = logR
     
+    total_time = time.time() - start_time 
     print('\n')
-    print('load  time:', 1e6 * load_time / Mrot / Ndata, 'ms')
-    print('dot   time:', 1e6 * dot_time / Mrot / Ndata, 'ms')
-    print('tomo  time:', 1e6 * tomo_time / Mrot / Ndata, 'ms')
+    print('total time: {:.2e}s'.format(total_time))
     print('\n')
+    print('total time seconds')
+    print('load  time: {:.1e}'.format( load_time))
+    print('dot   time: {:.1e}'.format( dot_time))
+    print('tomo  time: {:.1e}'.format( tomo_time))
+    print('\n')
+    print('total time %')
+    print('load  time: {:5.1%}'.format( load_time / total_time))
+    print('dot   time: {:5.1%}'.format( dot_time / total_time))
+    print('tomo  time: {:5.1%}'.format( tomo_time / total_time))
+    print('\n')
+    print("These numbers shouldn't change unless things are being done more efficiently:")
+    print('load  time / Ndata / Npix        : {:.2e}'.format( load_time / Mrot / Ndata))
+    print('dot   time / Ndata / Mrot / Npix : {:.2e}'.format( dot_time / Mrot / Ndata))
+    print('tomo  time / Mrot / Npix         : {:.2e}'.format( tomo_time / Mrot / Ndata))

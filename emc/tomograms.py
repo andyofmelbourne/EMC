@@ -25,16 +25,25 @@ import pyopencl.array
 gpu_precision = np.float32
 
 # find an opencl device (preferably a GPU) in one of the available platforms
+done = False
 for p in cl.get_platforms():
     devices = p.get_devices(cl.device_type.GPU)
-    if len(devices) > 0:
+    if (len(devices) > 0) and ('NVIDIA' in p.name):
+        done = True
         break
-    
+
+if not done :
+    for p in cl.get_platforms():
+        devices = p.get_devices(cl.device_type.GPU)
+        if (len(devices) > 0) :
+            break
+
 if len(devices) == 0 :
     for p in cl.get_platforms():
         devices = p.get_devices()
         if len(devices) > 0:
             break
+
 
 context = cl.Context(devices)
 queue   = cl.CommandQueue(context)
@@ -45,42 +54,8 @@ cl_code = cl.Program(context, r"""
     
     constant sampler_t trilinear = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_LINEAR ;
     
-    float4 _calculate_I_coord (
-    float qx, 
-    float qy,
-    float qz, 
-    float *R, 
-    const float i0, 
-    const float dq)
-    {
-    float4 coord ;
-    
-    coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
-    coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
-    coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
-    
-    return coord;
-    }
-
     
     // one worker per tomogram index
-    float _calculate_tomogram (
-    image3d_t I, 
-    float C,  
-    float qx, 
-    float qy,
-    float qz, 
-    float *R, 
-    const float i0, 
-    const float dq)
-    {
-    float4 coord = _calculate_I_coord(qx,qy,qz,R,i0,dq);
-    
-    float4 v = read_imagef(I, trilinear, coord);
-    
-    return v.x * C;
-    }
-
     __kernel void calculate_tomogram (
     image3d_t I, 
     global float *Cg,  
@@ -107,7 +82,15 @@ cl_code = cl.Program(context, r"""
         R[i] = Rg[9*r + i];
     }
     
-    out[n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+    float4 coord ;
+    
+    coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+    coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+    coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+    
+    float4 v = read_imagef(I, trilinear, coord);
+    
+    out[n] = v.x * C;
     }
 
     __kernel void calculate_tomogram_batch (
@@ -138,7 +121,15 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        out[Npix * (r-rmin) + n] = _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        
+        float4 v = read_imagef(I, trilinear, coord);
+        
+        out[Npix * (r-rmin) + n] = v.x * C;
     }
     }
 
@@ -171,7 +162,11 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        float4 coord = _calculate_I_coord(qx,qy,qz,R,i0,dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
          
         // get flattened I index
         out[Npix * r + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);
@@ -209,7 +204,11 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        float4 coord = _calculate_I_coord(qx,qy,qz,R,i0,dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
          
         // get flattened I index
         out[Npix * (r-rstart) + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);
@@ -245,7 +244,15 @@ cl_code = cl.Program(context, r"""
         R[i] = Rg[9*r + i];
     }
     
-    out[n] = log(wscale[r] * _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq));
+    float4 coord ;
+    
+    coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+    coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+    coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+    
+    float4 v = read_imagef(I, trilinear, coord);
+    
+    out[n] = log(wscale[r] *  v.x * C);
     }
 
     // one worker per index
@@ -280,7 +287,15 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        t = wscale[r] * _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        
+        float4 v = read_imagef(I, trilinear, coord);
+        
+        t = wscale[r] * v.x * C;
 
         if (t > 0.) 
             out[r*Npix + n] = log(t);
@@ -322,7 +337,15 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        t = wscale[r] * _calculate_tomogram(I, C,  qx, qy, qz, R, i0, dq);
+        float4 coord ;
+        
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        
+        float4 v = read_imagef(I, trilinear, coord);
+        
+        t = wscale[r] * v.x * C;
         
         if (t > 0.) 
             out[r*Npix + n] = log(t);
@@ -367,19 +390,23 @@ cl_code = cl.Program(context, r"""
 """).build()
 
 
-def calculate_tomograms(I, C, q, qmask, R, dq, rs):
+def calculate_tomograms(I, C, q, qmask, R, dq, rs, v = True):
     rc = len(rs)
+
+    if v :
+        disable = False
+    else :
+        disable = True
     
     Mrot = R.shape[0]
     
     # number of pixels within qmask
     Npix  = np.int32(np.sum(qmask))
     # pixel coordinate of q = 0 in I
-    i0 = np.float32((I.shape[0] - 1)//2)
+    i0 = np.float32(I.shape[0]//2)
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     W_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
-    wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
@@ -400,7 +427,7 @@ def calculate_tomograms(I, C, q, qmask, R, dq, rs):
 
     # calculate tomograms 
     index = 0
-    for r in tqdm.tqdm(rs, desc='calculating tomogram sums'):
+    for r in tqdm.tqdm(rs, desc='calculating tomogram sums', disable = disable):
         cl_code.calculate_tomogram(queue, (Npix,), None,
                 I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
                 R_cl.data, W_cl.data, i0, np.float32(dq), Npix, np.int32(r))
@@ -422,13 +449,12 @@ def calculate_tomogram_sums(I, C, q, qmask, R, dq, rc=256):
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     W_cl      = cl.array.empty(queue, (rc, Npix,), dtype = np.float32)
-    wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     C_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
     
-    cl.enqueue_copy(queue, R_cl.data, R.astype(np.float32))
+    cl.enqueue_copy(queue, R_cl.data, np.ascontiguousarray(R.astype(np.float32)))
     cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qz_cl.data, np.ascontiguousarray(q[2][qmask].astype(np.float32)))
@@ -472,7 +498,7 @@ if __name__ == '__main__':
     # number of pixels within qmask
     Npix  = np.int32(np.sum(qmask))
     # pixel coordinate of q = 0 in I
-    i0 = np.float32((I.shape[0] - 1)//2)
+    i0 = np.float32(I.shape[0]//2)
     
     R_cl  = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     W_cl       = cl.array.empty(queue, (Npix,), dtype = np.float32)
