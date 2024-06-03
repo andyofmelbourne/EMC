@@ -477,7 +477,7 @@ def calculate_tomogram_sums(I, C, q, qmask, R, dq, rc=256):
         cl.enqueue_copy(queue, W, W_cl.data)
         
         wsums_out[rmin:rmax] = np.sum(W, axis=1)[:rmax-rmin]
-    return wsums_out, W
+    return wsums_out
 
 
 if __name__ == '__main__':
