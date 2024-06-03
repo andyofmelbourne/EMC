@@ -214,10 +214,10 @@ if __name__ == '__main__':
     # write tomogram sums to file 
     print(f'writing tomogram + photon sums to {args.output}')
     with h5py.File(args.output, 'a') as f:
-        f['tomogram_sums'][...] = wsums
-        f['photon_sums'][...] = ksums
-        f['qmin'][...] = qmin
-        f['qmax'][...] = qmax
+        f['tomogram_sums'][...]  = wsums
+        f['photon_sums'][...]    = ksums
+        f['qmin'][...]           = qmin
+        f['qmax'][...]           = qmax
         f['rotation-order'][...] = rot_order
     
     # caluclate logR_dr = sum_i K_di log( w_ri )
@@ -228,13 +228,15 @@ if __name__ == '__main__':
 
     # scale tomograms
     if args.tomo_scale == None :
-        wscale = (Npix / wsums).astype(np.float32)
+        tomo_scale = Npix 
     else :
-        wscale = (args.tomo_scale / wsums).astype(np.float32)
+        tomo_scale = args.tomo_scale 
+    
+    wscale = (tomo_scale / wsums).astype(np.float32)
     
     with h5py.File(args.output, 'a') as f:
-        f['tomogram_scales'][...] = wscale
-
+        f['tomogram_scales'][...] = tomo_scale
+    
     K          = np.empty((args.dc, args.ic), dtype=np.float32)
     logR       = np.empty((Ndata, Mrot),    dtype=np.float32)
     logR_buf   = np.empty((args.dc, args.rc), dtype=np.float32)

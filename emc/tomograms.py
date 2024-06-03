@@ -390,19 +390,23 @@ cl_code = cl.Program(context, r"""
 """).build()
 
 
-def calculate_tomograms(I, C, q, qmask, R, dq, rs):
+def calculate_tomograms(I, C, q, qmask, R, dq, rs, v = True):
     rc = len(rs)
+
+    if v :
+        disable = False
+    else :
+        disable = True
     
     Mrot = R.shape[0]
     
     # number of pixels within qmask
     Npix  = np.int32(np.sum(qmask))
     # pixel coordinate of q = 0 in I
-    i0 = np.float32((I.shape[0] - 1)//2)
+    i0 = np.float32(I.shape[0]//2)
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     W_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
-    wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
@@ -423,7 +427,7 @@ def calculate_tomograms(I, C, q, qmask, R, dq, rs):
 
     # calculate tomograms 
     index = 0
-    for r in tqdm.tqdm(rs, desc='calculating tomogram sums'):
+    for r in tqdm.tqdm(rs, desc='calculating tomogram sums', disable = disable):
         cl_code.calculate_tomogram(queue, (Npix,), None,
                 I_cl, C_cl.data, qx_cl.data, qy_cl.data, qz_cl.data, 
                 R_cl.data, W_cl.data, i0, np.float32(dq), Npix, np.int32(r))
@@ -445,13 +449,12 @@ def calculate_tomogram_sums(I, C, q, qmask, R, dq, rc=256):
     
     R_cl      = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     W_cl      = cl.array.empty(queue, (rc, Npix,), dtype = np.float32)
-    wscale_cl = cl.array.empty(queue, (Mrot,), dtype = np.float32)
     qx_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     C_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
     
-    cl.enqueue_copy(queue, R_cl.data, R.astype(np.float32))
+    cl.enqueue_copy(queue, R_cl.data, np.ascontiguousarray(R.astype(np.float32)))
     cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qy_cl.data, np.ascontiguousarray(q[1][qmask].astype(np.float32)))
     cl.enqueue_copy(queue, qz_cl.data, np.ascontiguousarray(q[2][qmask].astype(np.float32)))
@@ -474,7 +477,7 @@ def calculate_tomogram_sums(I, C, q, qmask, R, dq, rc=256):
         cl.enqueue_copy(queue, W, W_cl.data)
         
         wsums_out[rmin:rmax] = np.sum(W, axis=1)[:rmax-rmin]
-    return wsums_out
+    return wsums_out, W
 
 
 if __name__ == '__main__':
@@ -495,7 +498,7 @@ if __name__ == '__main__':
     # number of pixels within qmask
     Npix  = np.int32(np.sum(qmask))
     # pixel coordinate of q = 0 in I
-    i0 = np.float32((I.shape[0] - 1)//2)
+    i0 = np.float32(I.shape[0]//2)
     
     R_cl  = cl.array.empty(queue, (9*Mrot,), dtype = np.float32)
     W_cl       = cl.array.empty(queue, (Npix,), dtype = np.float32)
