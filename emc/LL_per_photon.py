@@ -59,6 +59,8 @@ if __name__ == '__main__':
                         help="number of detector frames to simultaneously hold in memory for inner loop.")
     parser.add_argument('-o', '--output', type=str,  \
                         help="h5 file to write probability matrix. By default the output = probability-matrix-{merged_intensity}.h5")
+    parser.add_argument('-p', '--plot', type=bool, default = False, \
+                        help="show scatter plot of results")
     args = parser.parse_args()
     
     args.dataname = Path(args.data).stem
@@ -146,32 +148,41 @@ if __name__ == '__main__':
         
         Kw[dstart: dstop] = np.sum(W[: dd] * K[: dd], axis = 1)
     
-    # calculate log multiplicity
-    #m = scipy.special.factorial(ksums) / np.prod(scipy.special.factorial(K))
-    # logm = log(K_d!) - sum_i log(K_di!)
+    # save 
+    with h5py.File(args.output, 'a') as f:
+        dset = 'LL_per_photon'
+        if dset in f :
+            f[dset][:] = Kw
+        else :
+            f[dset] = Kw
     
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1, 1)
-    ax.scatter(ksums, Npix * Kw / ksums, alpha = 0.7, picker = 2, s = 10, label = 'log-likelihood per photon vs photon counts', cmap = 'viridis')
+    if args.plot :
+        # calculate log multiplicity
+        #m = scipy.special.factorial(ksums) / np.prod(scipy.special.factorial(K))
+        # logm = log(K_d!) - sum_i log(K_di!)
+        
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(1, 1)
+        ax.scatter(ksums, Npix * Kw / ksums, alpha = 0.7, picker = 2, s = 10, label = 'log-likelihood per photon vs photon counts', cmap = 'viridis')
 
-    import extra_geom
-    geom_fnam = f'crystfel_geom_0087.geom'
-    geom = extra_geom.DSSC_1MGeometry.from_crystfel_geom(geom_fnam)
-    
-    frame, centre = geom.position_modules(data_getter[:1, :].reshape((16, 128, 512)))
-    frame.fill(0)
-    
-    import pyqtgraph as pg
-    def on_pick(event):
-        i = event.ind[0]
-        geom.position_modules(data_getter[i:i+1, :].reshape((16, 128, 512)), out = frame)
-        pg.show(frame.copy()**0.1)
-    
-    fig.canvas.mpl_connect('pick_event', on_pick)
-    
-    ax.set_xscale('log')
-    ax.set_ylabel('Log-R')
-    ax.set_xlabel('photons in frame')
-    ax.legend()
-    
-    plt.show()
+        import extra_geom
+        geom_fnam = f'crystfel_geom_0087.geom'
+        geom = extra_geom.DSSC_1MGeometry.from_crystfel_geom(geom_fnam)
+        
+        frame, centre = geom.position_modules(data_getter[:1, :].reshape((16, 128, 512)))
+        frame.fill(0)
+        
+        import pyqtgraph as pg
+        def on_pick(event):
+            i = event.ind[0]
+            geom.position_modules(data_getter[i:i+1, :].reshape((16, 128, 512)), out = frame)
+            pg.show(frame.copy()**0.1)
+        
+        fig.canvas.mpl_connect('pick_event', on_pick)
+        
+        ax.set_xscale('log')
+        ax.set_ylabel('Log-R')
+        ax.set_xlabel('photons in frame')
+        ax.legend()
+        
+        plt.show()
