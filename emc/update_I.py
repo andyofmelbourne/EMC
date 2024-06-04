@@ -21,12 +21,12 @@ if __name__ == '__main__':
                         help="probability matrix h5 file contaning logR values to normalise. For multiple files use coma separated list (no spaces)")
     parser.add_argument('-d', '--data', type=str, default='data.cxi', \
                         help="cxi file containing data frames, for geometry.")
-    parser.add_argument('-T', '--data_T', type=str, default='data_T.h5', \
-                        help="h5 file containing transposed data frames.")
     parser.add_argument('--merge_I', action='store_true', \
                         help="merge tomograms in merged intensity space, this adds P . K in I and P . sum K / sum W in overlap then divides.")
     parser.add_argument('--inversion_symmetry', action='store_true', \
                         help="Enforce inversion symmetry on the merged intensities")
+    parser.add_argument('--p_thresh', type=float, default = 0.001, \
+                        help="probability threshold for excluding frames from tomogram slices before merge")
     parser.add_argument('-o', '--output', type=str, default='merged_intensity.pickle', \
                         help="name of output python pickle file. For multiple files an index will be appended.")
     args = parser.parse_args()
@@ -175,6 +175,12 @@ if __name__ == '__main__':
     qinds = Kinds[qmask]
     
     data_getter = Data_getter(args.data, 'entry_1/data_1/data')
+
+    # I want a rotation filter in order to discard tomograms with low associated P-values
+    # I can discard frames from tomograms
+    # or tomograms from merge, this is easier (but not really faster) since I can do this in the merge routine
+    # discard tomogram when maximum probability is less than tol / no of rotations
+
     
     for r in r_iter:
         rstart = r*args.rc
@@ -183,10 +189,23 @@ if __name__ == '__main__':
          
         with h5py.File(args.P_file) as f :
             f['probability_matrix_rd'].read_direct(P_buf, np.s_[rstart:rstop, :], np.s_[:dr])
-            cl.enqueue_copy(queue, P_cl.data, P_buf)
         
-        PK[:dr]        = P_buf.dot(ksums)[:dr]
-        PK_on_W_r[:dr] = PK[:dr] / wsums[rstart:rstop]
+        # subselect rotations 
+        rs = np.where(np.max(P_buf[:dr], axis=1) > args.p_thresh)[0]
+        
+        # subselect frames
+        ds = np.where(np.max(P_buf[:dr], axis=0) > args.p_thresh)[0]
+        
+        dr = len(rs)
+        dd = len(ds)
+
+        # now densify
+        P_buf[:dr, :dd] = np.ascontiguousarray(P_buf[np.ix_(rs, ds)])
+        
+        cl.enqueue_copy(queue, P_cl.data, P_buf)
+        
+        PK[:dr]        = P_buf[:dr, :dd].dot(ksums[ds])[:dr]
+        PK_on_W_r[:dr] = PK[:dr] / wsums[rstart + rs]
          
         # loop over detector pixels
         for i in i_iter :
@@ -196,21 +215,15 @@ if __name__ == '__main__':
             
             # copy data-pixels to gpu
             t0 = time.time()
-            #with h5py.File(args.data_T) as f:
-            #    if di != args.ic :
-            #        K.fill(0)
-            #    K[:, :di] = f['data_id'][qinds[istart:istop], :].T
-            #    cl.enqueue_copy(queue, K_cl.data, K)
-            
-            K[:, :di] = data_getter[:, qinds[istart:istop]]
-            K[:, di:] = 0
+            K[:dd, :di] = data_getter[ds, qinds[istart:istop]]
+            K[:dd, di:] = 0
             cl.enqueue_copy(queue, K_cl.data, K)
             
             load_time += time.time() - t0
             
             # calculate dot product (tomograms) W_ri = sum_d P_rd K_di 
             t0 = time.time()
-            pyclblast.gemm(queue, dr, di, Ndata, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic)
+            pyclblast.gemm(queue, dr, di, dd, P_cl, K_cl, W_cl, a_ld = Ndata, b_ld = args.ic, c_ld = args.ic)
             queue.finish()
             dot_time += time.time() - t0
             
@@ -232,6 +245,8 @@ if __name__ == '__main__':
             # should reduce W and Ipix to rc buffers to cut down on transfer...
             cl.enqueue_copy(queue, W, W_cl.data)
             cl.enqueue_copy(queue, Ipix, Ipix_cl.data)
+             
+            Ipix[:dr] = Ipix[rs]
             
             # merge tomograms Isum[n] +=  sum_d P_rd K_di[n] / (sold + pol. correction C_i[n])
             #                 O[n]    +=  sum_d P_rd sum_i K_di / sum_i Wold_ri
@@ -240,6 +255,7 @@ if __name__ == '__main__':
             # merge: can I do this on the gpu?
             merge_tomos.queue.finish()
             Wd[:dr] = W[:dr]
+
              
             MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, merge_I = args.merge_I, is_blocking=False)
             merge_time += time.time() - t0
