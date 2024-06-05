@@ -199,6 +199,11 @@ if __name__ == '__main__':
         dr = len(rs)
         dd = len(ds)
 
+        # if the number of rotations or frames == 0 then skip
+        if dr == 0 or dd == 0 :
+            print('\n\nthere are no frames with P > {args.p_thresh} for rotations between {rstart} and {rstop}, skipping...\n')
+            continue
+
         # now densify
         P_buf[:dr, :dd] = np.ascontiguousarray(P_buf[np.ix_(rs, ds)])
         
