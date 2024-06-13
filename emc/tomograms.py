@@ -162,11 +162,11 @@ cl_code = cl.Program(context, r"""
             R[i] = Rg[9*r + i];
         }
         
-        float4 coord ;
-        
-        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
-        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
-        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        // no 0.5 here
+        // that's because the 0.5 is to account for the way image interpolation works in opencl 
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq;
          
         // get flattened I index
         out[Npix * r + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);
@@ -199,16 +199,18 @@ cl_code = cl.Program(context, r"""
 
     for (int r=rstart; r<rstop; r++){
         float R[9];
-
+        
         for (int i=0; i<9; i++) {
             R[i] = Rg[9*r + i];
         }
         
         float4 coord ;
         
-        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq + 0.5;
-        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq + 0.5;
-        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq + 0.5;
+        // no 0.5 here
+        // that's because the 0.5 is to account for the way image interpolation works in opencl 
+        coord.x = i0 + (R[0] * qx + R[1] * qy + R[2] * qz) / dq;
+        coord.y = i0 + (R[3] * qx + R[4] * qy + R[5] * qz) / dq;
+        coord.z = i0 + (R[6] * qx + R[7] * qy + R[8] * qz) / dq;
          
         // get flattened I index
         out[Npix * (r-rstart) + n] = convert_int_rte(coord.x) * M * M + convert_int_rte(coord.y) * M + convert_int_rte(coord.z);

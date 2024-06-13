@@ -201,7 +201,7 @@ if __name__ == '__main__':
 
         # if the number of rotations or frames == 0 then skip
         if dr == 0 or dd == 0 :
-            print('\n\nthere are no frames with P > {args.p_thresh} for rotations between {rstart} and {rstop}, skipping...\n')
+            print(f'\n\nthere are no frames with P > {args.p_thresh} for rotations between {rstart} and {rstop}, skipping...\n')
             continue
 
         # now densify
