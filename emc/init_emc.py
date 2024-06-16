@@ -48,7 +48,7 @@ if __name__ == '__main__':
     for fnam in args.data :
         with h5py.File(fnam, 'r') as f:
             # pixel mask
-            mask = f['entry_1/instrument_1/detector_1/mask'][()]
+            mask = f['entry_1/instrument_1/detector_1/good_pixels'][()]
 
             # pixel map
             xyz  = f['/entry_1/instrument_1/detector_1/xyz_map'][()]
@@ -177,5 +177,6 @@ if __name__ == '__main__':
                 fnam      = '.'.join(fnam)
             
             pickle.dump({'qmax': qmax_max, 'qmin': qmin, 'dq': dq, 'I': I, 't': t, 'sample-state': s, 'data-set': args.data[d]}, open(fnam, 'wb'))
+            t += 1
     
     
