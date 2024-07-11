@@ -25,7 +25,7 @@ if __name__ == '__main__':
                         help="merge tomograms in merged intensity space, this adds P . K in I and P . sum K / sum W in overlap then divides.")
     parser.add_argument('--inversion_symmetry', action='store_true', \
                         help="Enforce inversion symmetry on the merged intensities")
-    parser.add_argument('--p_thresh', type=float, default = 0.001, \
+    parser.add_argument('--p_thresh', type=float, default = 0.000, \
                         help="probability threshold for excluding frames from tomogram slices before merge")
     parser.add_argument('-o', '--output', type=str, default='merged_intensity.pickle', \
                         help="name of output python pickle file. For multiple files an index will be appended.")
@@ -109,7 +109,8 @@ if __name__ == '__main__':
     #with h5py.File(args.P_file) as f :
     #    P = np.ascontiguousarray(f['probability_matrix'][()].T.astype(np.float32))
     
-    P_buf = np.empty((args.rc, Ndata), dtype=np.float32)
+    P_buf    = np.empty((args.rc, Ndata), dtype=np.float32)
+    P_buf_dr = np.empty((Ndata, args.rc), dtype=np.float32)
      
     Ndata  = np.int32(Ndata)
     Mrot   = np.int32(Mrot)
@@ -187,8 +188,14 @@ if __name__ == '__main__':
         rstop  = min(rstart + args.rc, Mrot)
         dr     = rstop - rstart
          
+        # this could be very slow...
+        #print('\n\nLoading probability matrix\n\n')
         with h5py.File(args.P_file) as f :
-            f['probability_matrix_rd'].read_direct(P_buf, np.s_[rstart:rstop, :], np.s_[:dr])
+            # we cannot read direct with non-contiguous chunks
+            #f['probability_matrix'].read_direct(P_buf_dr, np.s_[:, rstart:rstop], np.s_[:, :dr])
+            P_buf_dr[:, :dr] = f['probability_matrix'][:, rstart:rstop]
+        
+        P_buf[:dr, :] = P_buf_dr[:, :dr].T
         
         # subselect rotations 
         rs = np.where(np.max(P_buf[:dr], axis=1) > args.p_thresh)[0]
@@ -198,6 +205,8 @@ if __name__ == '__main__':
         
         dr = len(rs)
         dd = len(ds)
+        
+        #print(f'\n\nnumber of rotation {dr} number of frames {dd}\n\n')
 
         # if the number of rotations or frames == 0 then skip
         if dr == 0 or dd == 0 :

@@ -145,12 +145,10 @@ def check_output_file(output, Ndata, Mrot):
             f.create_dataset('tomogram_sums', 
                 shape = (Mrot,), 
                 dtype=float)
-            f.create_dataset('tomogram_scales', 
-                shape = (Mrot,), 
-                dtype=float)
             f.create_dataset('photon_sums', 
                 shape = (Ndata,), 
                 dtype=float)
+            f['tomogram_scale'] = 0.
             f['qmin'] = 0.
             f['qmax'] = 0.
             f['rotation-order'] = 1
@@ -235,7 +233,7 @@ if __name__ == '__main__':
     wscale = (tomo_scale / wsums).astype(np.float32)
     
     with h5py.File(args.output, 'a') as f:
-        f['tomogram_scales'][...] = tomo_scale
+        f['tomogram_scale'][...] = tomo_scale
     
     K          = np.empty((args.dc, args.ic), dtype=np.float32)
     logR       = np.empty((Ndata, Mrot),    dtype=np.float32)
