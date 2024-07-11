@@ -52,7 +52,7 @@ import os
 import logR
 from emc.tomograms import *
 import emc.merge_tomos as merge_tomos
-from emc.data_getter import Data_getter
+from emc.data_getter import Data_getter, Mask_getter
 
 import pyclblast
 
@@ -176,6 +176,7 @@ if __name__ == '__main__':
     qinds = Kinds[qmask]
     
     data_getter = Data_getter(args.data, 'entry_1/data_1/data')
+    mask_getter = Mask_getter(args.data, '/entry_1/instrument_1/detector_1/mask')
 
     # I want a rotation filter in order to discard tomograms with low associated P-values
     # I can discard frames from tomograms
@@ -231,6 +232,14 @@ if __name__ == '__main__':
             t0 = time.time()
             K[:dd, :di] = data_getter[ds, qinds[istart:istop]]
             K[:dd, di:] = 0
+
+            # copy per pattern mask to cpu
+            mask[:dd, :di] = mask_getter[ds, qinds[istart:istop]]
+            mask[:dd, di:] = 0
+
+            # mask pixels
+            K *= mask
+            
             cl.enqueue_copy(queue, K_cl.data, K)
             
             load_time += time.time() - t0
@@ -269,7 +278,11 @@ if __name__ == '__main__':
             # merge: can I do this on the gpu?
             merge_tomos.queue.finish()
             Wd[:dr] = W[:dr]
-
+            
+            # Hack!
+            # normalise for masked pixels
+            # W /= D - sum_d M_di
+            Wd[:dr] /= np.clip(dd - np.sum(mask[:dd, :di], axis = 0), 1, None)
              
             MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, merge_I = args.merge_I, is_blocking=False)
             merge_time += time.time() - t0

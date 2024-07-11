@@ -262,8 +262,60 @@ class Data_getter_2():
             out[i] = frame[pixels]
             
         return out
+
         
+class Mask_getter_2():
+    """Save full dataset in sparse format
+    
+    Load full dataset in memory and keep it there. 
+
+    for the per pattern mask, store indices where the mask is zero
+    because I assume that will be a more sparse dataset"""
+    def __init__(self, fnam, dataset, cachedir = './cachedir'):
+        self.fnam    = fnam
+        self.dataset = dataset
+        self.cache   = {}
+        self.sparse_fnam = f'cachedir/mask-{fnam}-sparse.h5'
+         
+        with h5py.File(self.fnam) as f:
+            self.dtype = f[dataset].dtype
+            self.shape = f[dataset].shape
+        
+        # store indices
+        self.indices      = np.arange(self.shape[0])
+        
+        # create cachedir if needed
+        if not os.path.exists(cachedir):
+            os.mkdir(cachedir)
+        self.cachedir = cachedir
+        
+        # check if sparse file exists
+        self.sparse_file = os.path.exists(self.sparse_fnam) 
+        self.loaded      = False
+        
+        if not self.sparse_file :   
+            self.save_sparse() 
+        
+        if not self.loaded :
+            self.load_sparse()
+
+        # index frames 
+        self.frame_indices = np.concatenate(([0], np.cumsum(self.litpix)))
+    
+    def save_sparse(self):
+        inds    = []
+        photons = []
+        litpix  = []
+        with h5py.File(self.fnam, 'r') as f:
+            for d in tqdm(range(self.shape[0]), desc = 'extracting data into sparse format'):
+                # invert mask
+                frame   = ~f[self.dataset][d].ravel() 
+                inds.append(np.where(frame > 0)[0])
+                photons.append(frame[inds[-1]].copy())
+                litpix.append(len(inds[-1]))
+
             
     
 
 Data_getter = Data_getter_2
+Mask_getter = Mask_getter_2
