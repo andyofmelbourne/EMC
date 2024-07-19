@@ -246,7 +246,7 @@ if __name__ == '__main__':
     qy_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     qz_cl     = cl.array.empty(queue, (Npix,), dtype = np.float32)
     C_cl      = cl.array.empty(queue, (Npix,), dtype = np.float32)
-    W_cl      = cl.array.empty(queue, (Mrot, args.ic), dtype = np.float32)
+    W_cl      = cl.array.empty(queue, (args.rc, args.ic), dtype = np.float32)
     logR_cl   = cl.array.zeros(queue, (args.dc, args.rc), dtype=np.float32)
     
     cl.enqueue_copy(queue, qx_cl.data, np.ascontiguousarray(q[0][qmask].astype(np.float32)))
@@ -329,7 +329,8 @@ if __name__ == '__main__':
                 # calculate dot product: logR_dr += sum_(i in mask) K_di log(w_ri)
                 #                            w_ri = tomo_scale * W_ri / sum_i W_ri 
                 t0 = time.time()
-                pyclblast.gemm(queue, dd, dr, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = args.rc, b_offset = rstart*args.ic, b_transp=True, beta=1.)
+                #pyclblast.gemm(queue, dd, dr, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = args.rc, b_offset = rstart*args.ic, b_transp=True, beta=1.)
+                pyclblast.gemm(queue, dd, dr, di, K_cl, W_cl, logR_cl, a_ld=args.ic, b_ld=args.ic, c_ld = args.rc, b_offset = 0, b_transp=True, beta=1.)
                 queue.finish()
                 dot_time += time.time() - t0
             

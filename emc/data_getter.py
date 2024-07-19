@@ -304,16 +304,47 @@ class Mask_getter_2():
     
     def save_sparse(self):
         inds    = []
-        photons = []
         litpix  = []
         with h5py.File(self.fnam, 'r') as f:
             for d in tqdm(range(self.shape[0]), desc = 'extracting data into sparse format'):
                 # invert mask
                 frame   = ~f[self.dataset][d].ravel() 
                 inds.append(np.where(frame > 0)[0])
-                photons.append(frame[inds[-1]].copy())
                 litpix.append(len(inds[-1]))
 
+        self.litpix  = np.array(litpix)
+        self.inds    = np.concatenate(inds)
+            
+        for _ in tqdm(range(1), desc = 'saving data in sparse format'):
+            with h5py.File(self.sparse_fnam, 'w') as out:
+                out['litpix']  = self.litpix
+                out['inds']    = self.inds
+        
+        self.sparse_file = True
+        self.loaded      = False
+    
+    def load_sparse(self):
+        for _ in tqdm(range(1), desc = 'loading sparse photons from file'):
+            with h5py.File(self.sparse_fnam, 'r') as f:
+                self.litpix  = f['litpix'][()]
+                self.inds    = f['inds'][()]
+        
+        self.loaded = True
+                
+    def __getitem__(self, key):
+        frames = np.arange(len(self.litpix))[key[0]]
+        pixels = np.arange(np.prod(self.shape[1:]))[key[1]]
+        
+        out   = np.ones((len(frames), len(pixels)), dtype = self.dtype)
+        frame = np.ones((np.prod(self.shape[1:]),), dtype = self.dtype)
+        for i, d in enumerate(frames) :
+            frame.fill(True)
+            j0 = self.frame_indices[d]
+            j1 = self.frame_indices[d + 1]
+            frame[self.inds[j0: j1]] = False
+            out[i] = frame[pixels]
+            
+        return out
             
     
 

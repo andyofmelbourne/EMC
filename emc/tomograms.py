@@ -350,9 +350,9 @@ cl_code = cl.Program(context, r"""
         t = wscale[r] * v.x * C;
         
         if (t > 0.) 
-            out[r*Npix + n] = log(t);
+            out[(r-rmin)*Npix + n] = log(t);
         else 
-            out[r*Npix + n] = 0.;
+            out[(r-rmin)*Npix + n] = 0.;
     }
     }
 

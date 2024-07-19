@@ -130,6 +130,7 @@ if __name__ == '__main__':
     Wd   = np.empty((args.rc, args.ic), dtype = np.float64)
     Ipix = np.empty((args.rc, args.ic), dtype = np.int32)
     K    = np.empty((Ndata, args.ic), dtype=np.float32)
+    #mask = np.empty((Ndata, args.ic), dtype=bool)
     PK   = np.empty((args.rc,), dtype=np.float64)
     PK_on_W_r = np.empty((args.rc,), dtype=np.float64)
 
@@ -176,13 +177,12 @@ if __name__ == '__main__':
     qinds = Kinds[qmask]
     
     data_getter = Data_getter(args.data, 'entry_1/data_1/data')
-    mask_getter = Mask_getter(args.data, '/entry_1/instrument_1/detector_1/mask')
+    #mask_getter = Mask_getter(args.data, '/entry_1/instrument_1/detector_1/mask')
 
     # I want a rotation filter in order to discard tomograms with low associated P-values
     # I can discard frames from tomograms
     # or tomograms from merge, this is easier (but not really faster) since I can do this in the merge routine
     # discard tomogram when maximum probability is less than tol / no of rotations
-
     
     for r in r_iter:
         rstart = r*args.rc
@@ -234,11 +234,11 @@ if __name__ == '__main__':
             K[:dd, di:] = 0
 
             # copy per pattern mask to cpu
-            mask[:dd, :di] = mask_getter[ds, qinds[istart:istop]]
-            mask[:dd, di:] = 0
+            #mask[:dd, :di] = mask_getter[ds, qinds[istart:istop]]
+            #mask[:dd, di:] = 0
 
             # mask pixels
-            K *= mask
+            #K *= mask
             
             cl.enqueue_copy(queue, K_cl.data, K)
             
@@ -281,8 +281,10 @@ if __name__ == '__main__':
             
             # Hack!
             # normalise for masked pixels
-            # W /= D - sum_d M_di
-            Wd[:dr] /= np.clip(dd - np.sum(mask[:dd, :di], axis = 0), 1, None)
+            # W /= sum_d M_di/D
+            #temp = np.sum(mask[:dd, :di], axis = 0) / dd
+            #temp[temp == 0] = 1
+            #Wd[:dr, :di] /= temp
              
             MT.merge(Wd, Ipix, 0, dr, PK_on_W_r, di, merge_I = args.merge_I, is_blocking=False)
             merge_time += time.time() - t0
