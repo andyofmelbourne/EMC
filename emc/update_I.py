@@ -25,6 +25,8 @@ if __name__ == '__main__':
                         help="merge tomograms in merged intensity space, this adds P . K in I and P . sum K / sum W in overlap then divides.")
     parser.add_argument('--inversion_symmetry', action='store_true', \
                         help="Enforce inversion symmetry on the merged intensities")
+    parser.add_argument('--octahedral_symmetry', action='store_true', \
+                        help="Enforce octahedral symmetry on the merged intensities")
     parser.add_argument('--p_thresh', type=float, default = 0.000, \
                         help="probability threshold for excluding frames from tomogram slices before merge")
     parser.add_argument('-o', '--output', type=str, default='merged_intensity.pickle', \
@@ -53,6 +55,7 @@ import logR
 from emc.tomograms import *
 import emc.merge_tomos as merge_tomos
 from emc.data_getter import Data_getter, Mask_getter
+from emc import symmetry
 
 import pyclblast
 
@@ -295,15 +298,21 @@ if __name__ == '__main__':
     I = comm.reduce(I, op=MPI.SUM, root=0)
 
     if rank == 0 :
+
+        if args.octahedral_symmetry :
+            print('\n')
+            print('enforcing octahedral symmetry: (24 asymmetric units)')
+             
+            I = symmetry.octahedral_symmetry(I)
+            O = symmetry.octahedral_symmetry(O)
+            
+
         if args.inversion_symmetry :
             print('\n')
             print('enforcing inversion symmetry:')
-            if I.shape[0] % 2 == 0 :
-                shift = 1
-            else :
-                shift = 0
-            I = I + np.roll(I[::-1, ::-1, ::-1], shift, axis = (0,1,2))
-            O = O + np.roll(O[::-1, ::-1, ::-1], shift, axis = (0,1,2))
+            
+            I = symmetry.inversion_symmetry(I)
+            O = symmetry.inversion_symmetry(O)
         
         overlap = O.copy()
         Isum = I.copy()
