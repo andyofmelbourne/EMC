@@ -7,7 +7,9 @@ if __name__ == '__main__':
     """
     parser = argparse.ArgumentParser(description=description, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-b', '--beta', type=float, default=0.001, \
-                        help="beta parameter for probabilities: P <-- P^beta.")
+                        help="beta parameter for probabilities: R <-- R^beta.")
+    parser.add_argument('-g', '--gamma', type=float, \
+                        help="gamma parameter for probabilities, makes sample states closer without effecting orientations.")
     parser.add_argument('-P', '--P_file', type=str, default=None, \
                         help="probability matrix h5 file contaning logR values to normalise. Defaults to probability-matrix-merged_intensity*.h5")
     parser.add_argument('-s', '--sample_smoothing', type=float, default=0, \
@@ -132,19 +134,47 @@ if __name__ == '__main__':
         most_likely_state[d] = ml // Mrot 
         Lmax = logR[most_likely_state[d], most_likely[d]]
         
+        # R of most likely orientation within each state
+        Lmax_r = np.max(logR, axis=1)
+        
         # calculate probability 
         #######################
-        # P = e^( beta * logR ) / sum_r e^( beta * logR )
-        #   P[r]  = e^( beta * (logR[r] - logR_max))  
-        #   P[r] /= sum_r P[r]
-        P[:] = np.exp( args.beta * (logR - Lmax)) 
-        P   /= np.sum(P)
+        if args.gamma is None or sample_states == 1:
+            # P = e^( beta * logR ) / sum_r e^( beta * logR )
+            #   P[r]  = e^( beta * (logR[r] - logR_max))  
+            #   P[r] /= sum_r P[r]
+            P[:] = np.exp( args.beta * (logR - Lmax)) 
+            P   /= np.sum(P)
 
-        if args.sample_smoothing != 0. :
-            Pmean[:] = np.mean(P, axis = 0)
-            for t in range(P.shape[0]):
-                P[t] = (1-args.sample_smoothing) * P[t] + args.sample_smoothing * Pmean 
-            P /= np.sum(P)
+            if args.sample_smoothing != 0. :
+                Pmean[:] = np.mean(P, axis = 0)
+                for t in range(P.shape[0]):
+                    P[t] = (1-args.sample_smoothing) * P[t] + args.sample_smoothing * Pmean 
+                P /= np.sum(P)
+        else :
+            # logRg_t              = beta logR + (gamma-1) log(\sum_r R^beta)
+            # log(\sum_r R^beta)_t = beta logR_max_r + log(\sum_r e^(beta (logR - logR_max_r)))
+            # logRg_t              = beta logR + (gamma-1) [beta logR_max_r + log(\sum_r e^(beta (logR - logR_max_r)))]
+             
+            # logRg_t              = beta (logR-logR_max_r) + gamma beta logR_max_r + (gamma-1)log(\sum_r e^(beta (logR - logR_max_r)))]
+            
+            # renormalise R to make integrated value more similar between states
+            for t in range(sample_states):
+                logR[t]  = args.beta * (logR[t] - Lmax_r[t])
+                logR[t] += args.beta * args.gamma * Lmax_r[t] + (args.gamma - 1) * np.log(np.sum(np.exp(logR[t])))
+            
+            # the argmax of logR should remain the same, just not the value
+            Lmax = logR[most_likely_state[d], most_likely[d]]
+            
+            # now normalise over all orientations and states
+            P[:] = np.exp(logR - Lmax)
+            P   /= np.sum(P)
+            
+            if args.sample_smoothing != 0. :
+                Pmean[:] = np.mean(P, axis = 0)
+                for t in range(P.shape[0]):
+                    P[t] = (1-args.sample_smoothing) * P[t] + args.sample_smoothing * Pmean 
+                P /= np.sum(P)
         
         occupancy += np.sum(P, axis=1)
         
