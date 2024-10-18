@@ -81,7 +81,7 @@ def inversion_symmetry(ar):
     
 if __name__ == '__main__':
     import pyqtgraph as pg
-
+    
     # paint on +z 
     a = np.zeros((16,16,16), dtype = int)
     a[8,2,-1] = 2

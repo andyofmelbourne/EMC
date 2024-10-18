@@ -55,8 +55,14 @@ import math
 
 from emc.data_getter import Data_getter
 
+def round_up_to_odd(f):
+    return int(np.ceil(f) // 2 * 2 + 1)
+
 def get_rotations(M):
-    M_in_plane = int(np.pi * M)+1
+    # we want this to be odd (so that inversion symmetry is more useful)
+    #M_in_plane = int(np.pi * M)+1
+    M_in_plane = round_up_to_odd(np.pi * M)
+    
     M_sphere   = int(np.pi * M**2)+1
     Mrot = M_in_plane * M_sphere
         
