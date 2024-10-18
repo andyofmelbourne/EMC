@@ -50,7 +50,7 @@ if __name__ == '__main__':
 
             # pixel map
             xyz  = f['/entry_1/instrument_1/detector_1/xyz_map'][()]
-            E    = np.mean(f['/entry_1/instrument_1/source_1/energy'][()])
+            wav  = np.mean(f['/entry_1/instrument_1/source_1/photon_wavelength'][()])
             dx   = f['entry_1/instrument_1/detector_1/x_pixel_size'][()]
             dy   = f['entry_1/instrument_1/detector_1/y_pixel_size'][()]
 
@@ -64,11 +64,12 @@ if __name__ == '__main__':
             
         # Determine q, dq, qmax, qmask and correction (data to merge)
         # -----------------------------------------------------------
-        wav = sc.h * sc.c / E
+        #wav = sc.h * sc.c / E
         r = np.sum(xyz**2, axis=0)**0.5
         q = xyz.copy() / r
         q[2] -= 1
         q /= wav
+        print('wav', wav)
         
         r = np.sum(xyz**2, axis=0)**0.5
             
@@ -87,7 +88,7 @@ if __name__ == '__main__':
         
         # scale 
         C /= C[mask].max()
-
+        
         qr = np.sum(q**2, axis=0)**0.5
         
         q_corner = qr[mask].max()
